@@ -1,0 +1,49 @@
+#!/usr/bin/env python2.6
+# -*- mode : python -*-
+# -*- coding: utf-8 -*-
+
+## global imports 
+import random
+import ROOT
+from root_numpy import root2array
+import numpy as np
+import pandas as pd
+import tables
+import os
+
+## local imports 
+from ditaumassskl.features import features, target
+from logs import *
+    
+## root_numpy library makes it easy to read your data stored 
+## in a ROOT TTree. Each call to root2array will create a 2D array which contains 
+## one row per event, and one column representing each branch you want to use
+
+## it should be a TCut object
+selection = "(0.8 < ditau_dr < 2.4) && (ditau_deta)"
+
+## transfer TTree object to a NumPy array object
+#train_array= root2array(ifile, selection= selection, branches=features, treename="NOMINAL")
+
+# # Create a pandas DataFrame for our data
+# # this provides many convenience functions
+# # for exploring your dataset
+# # need to reshape it so it is a 2D array with one column
+
+for fname in os.listdir("ntuples/"):
+    if ".root" in fname:
+        logger.info("Opening ntuples/%s"%fname)
+        train_array= root2array("ntuples/"+fname, selection= selection, branches=features, treename="NOMINAL")
+        df = pd.DataFrame(np.hstack((train_array.reshape(train_array.shape[0], -1))),
+                          columns=features)
+        ## save data frame object as hdf5 objects as they are much faster to manipulate
+        outfile = "ntuples/HDF5/"+ fname[:-5] + ".h5"
+        if os.path.exists(outfile):
+            logger.warn(" %s already exists"% outfile)
+            raise Exception()
+
+        logger.info("Creating %s"% outfile)
+        store = pd.HDFStore(outfile)
+        store['train']= df
+        store.close()
+
