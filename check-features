@@ -1,6 +1,7 @@
-#! /usr/bin/env python
+#! /usr/bin/env python2.6
 
 ## python imports
+import os
 import random
 import pandas as pd
 import numpy as np
@@ -11,94 +12,35 @@ from pandas.core.index import Index
 from pandas.tools import plotting
 from pandas.tools.plotting import scatter_matrix
 
-
-## sklearn imports 
-from sklearn import datasets
-from sklearn.metrics import classification_report, roc_auc_score
-from sklearn.tree import DecisionTreeRegressor
-from sklearn.ensemble import AdaBoostRegressor
-
-# root_numpy library makes it easy to read your data stored 
-# in a ROOT TTree. Each call to root2array will create a 2D array which contains 
-#one row per event, and one column representing each branch you want to use
-
-from root_numpy import root2array, rec2array, tree2rec
-import ROOT
-
-## test root file
-ifile = "./ntuples/truth_gg_100_train.root"
-test_file = "./ntuples/truth_gg_155_train.root"
-
-
-# Convert the TTree into a NumPy record array
-features = ['ditau_dr',
-            'met_et',
-            'ditau_scal_sum_pt',
-            'ditau_vect_sum_pt',
-            'ditau_mt_lep0_met',
-            'ditau_mt_lep1_met',
-            'ditau_dpt',
-            'ditau_vis_mass',
-            # 'ditau_dphi',
-            # 'ditau_tau0_pt',
-            # 'ditau_tau1_pt',
-            # 'ditau_met_min_dphi',
-            # 'ditau_met_lep0_cos_dphi',
-            # 'ditau_met_lep1_cos_dphi',
-            ]
-
-target = ["parent_m"]
+## local imports
+from ditaumassskl.features import *
+from ditaumassskl.log import *
+from ditaumassskl.categories.mva import *
 
 ## it must be in TTreeFormula format, a TCut object 
-selection = "(0.8 < ditau_dr <2.4) && (ditau_deta < 1.5)" #& "ditau_deta ,1.5"
-#selection= "ditau_tau0_matched_isHadTau==1 && ditau_tau1_matched_isHadTau==1"
+selection = Category_Preselection.common_cuts
+# selection= "ditau_tau0_matched_isHadTau==1"#] && df[ditau_tau1_matched_isHadTau==1]"
 
-## Convert a TTree object to a NumPy structured array
-var = root2array(ifile, selection=selection,treename="NOMINAL", branches=features)
+# ## read hdf5 files to DataFrames
+# train_dfs= []
+# for fname in os.listdir("hdf5s/TrainingBRT/"):
+#     train_df = pd.read_hdf("hdf5s/TrainingBRT/"+fname)
+#     logger.info("Adding sample of size {0}".format(train_df.shape))
+#     train_dfs.append(train_df)
 
-# Create a pandas DataFrame for our data
-# this provides many convenience functions
-# for exploring your dataset
-# need to reshape y so it is a 2D array with one column
+# ## concatenate DataFrames
+# data = pd.concat(train_dfs, ignore_index=True)
 
-df = pd.DataFrame(np.hstack((var.reshape(var.shape[0], -1))),
-                  columns=features+['var'])
+# ## scatter plots, pick 5000 data points randomly
+# cm = plt.cm.get_cmap('RdYlBu')
+# df1=data.ix[random.sample(data.index, 1000)]
+# fig = plt.figure()
 
-## scatter plots, pick 5000 data points randomly
-#import matplotlib
-cm = plt.cm.get_cmap('RdYlBu')
-df1=df.ix[random.sample(df.index, 1000)]
-fig = plt.figure()
-df1.plot(kind="scatter", x = "ditau_vis_mass", y = "met_et")
-fig=plt.gcf()
-fig.savefig("test.eps")
-
-# rfile = ROOT.TFile(ifile)
-# itree = rfile.Get("NOMINAL")
-# tfile = ROOT.TFile(test_file)
-# ttree = tfile.Get("NOMINAL")
-
-# train_record_array = tree2rec(itree, features, selection)
-# train_target_array = tree2rec(itree, target, selection)
-# test_array         = tree2rec(ttree, features, selection)
-
-# print len(train_record_array), len(train_target_array)
-
-# ## you have to save it to another array (tuples are immutable)
-# train_record_array_new= np.array([ f for evt in train_record_array for f in evt ]) 
-# train_target_array_new= np.array([ f for evt in train_target_array for f in evt ]) 
-# test_array_new            =np.array([ x for evt in test_array for x in evt ])
-# ## reshape has to be saved to another array !!!
-# input_array = train_record_array_new.reshape(len(train_target_array), len(features))
-# target_array = train_target_array_new.reshape(len(train_target_array))
-# t_array = test_array_new.reshape(len(test_array), len(features))
-
-# ## estimate
-# rng = np.random.RandomState(1)
-# regressor = AdaBoostRegressor(DecisionTreeRegressor(max_depth=10, min_samples_leaf=200),
-#                           n_estimators=100)
-# regressor.fit(input_array, target_array)
-
-# res= regressor.predict(t_array)
-# for r in res[:50]:
-#     print r
+# ## mutual correlation between input variables
+# # for var1 in features:
+# #     for var2 in ["parent_m"]:
+# #         if var1!=var2:
+# #             df1.plot(kind="scatter", x = var1, y = var2)
+# #             fig=plt.gcf()
+# #             fig.savefig("./OutPlots/LinearCorrelation_%s_vs_%s.eps"%(var1,var2))
+# #             fig.clear()

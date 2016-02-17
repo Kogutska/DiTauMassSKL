@@ -38,7 +38,6 @@ class Category_VBF(Category_Preselection):
     jk_number = 6
     common_cuts = Category_Preselection.common_cuts
     cuts = (
-        #common_cuts
         CUTS_VBF
         #& Cut('dEta_jets > 2.0')
         )
@@ -55,7 +54,6 @@ class Category_VBF(Category_Preselection):
     norm_category = Category_Preselection
     controls = {'deta': Category_VBF_DEta_Control}
 
-
 class Category_Boosted_NO_PTH_CUT(Category_Preselection):
     # for demonstration purposes. see plot-cuts
     name = 'boosted'
@@ -65,7 +63,6 @@ class Category_Boosted_NO_PTH_CUT(Category_Preselection):
         (- Category_VBF.cuts)
         & DETA_TAUS
         )
-
 
 class Category_Boosted_DEta_Control(Category_Preselection):
     is_control = True

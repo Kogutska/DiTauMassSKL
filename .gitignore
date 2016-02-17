@@ -1,3 +1,6 @@
 ntuples/
 OutPlots
 ntuples
+plots
+RESULTS
+*.pyc

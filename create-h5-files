@@ -10,40 +10,48 @@ import numpy as np
 import pandas as pd
 import tables
 import os
+from multiprocessing import Process
+from argparse import ArgumentParser
 
 ## local imports 
-from ditaumassskl.features import features, target
-from logs import *
+from ditaumassskl.features import branches
+from ditaumassskl.log import *
     
 ## root_numpy library makes it easy to read your data stored 
 ## in a ROOT TTree. Each call to root2array will create a 2D array which contains 
 ## one row per event, and one column representing each branch you want to use
 
-## it should be a TCut object
-selection = "(0.8 < ditau_dr < 2.4) && (ditau_deta)"
+## filters: should be a ROOT.TCut object 
+## apply truth-matching
+selection = "(ditau_tau1_matched_isHadTau==1) && (ditau_tau0_matched_isHadTau==1)"
 
-## transfer TTree object to a NumPy array object
-#train_array= root2array(ifile, selection= selection, branches=features, treename="NOMINAL")
-
-# # Create a pandas DataFrame for our data
-# # this provides many convenience functions
-# # for exploring your dataset
-# # need to reshape it so it is a 2D array with one column
-
-for fname in os.listdir("ntuples/"):
-    if ".root" in fname:
-        logger.info("Opening ntuples/%s"%fname)
-        train_array= root2array("ntuples/"+fname, selection= selection, branches=features, treename="NOMINAL")
-        df = pd.DataFrame(np.hstack((train_array.reshape(train_array.shape[0], -1))),
-                          columns=features)
+class Job(Process):
+    def __init__(self, infile):
+        super(Job,self).__init__()
+        self.path, self.filename = os.path.split(infile)
+        # self.filename =filename
+        
+    def run(self):
+        logger.info("Opening %s" %os.path.join(self.path,self.filename))
+        ## transfer TTree to NumPy array
+        train_array= root2array(os.path.join(self.path, self.filename),selection=selection, treename="NOMINAL")
+        ## create pandas DataFrame object to manipluate data in an easy way
+        df = pd.DataFrame(np.hstack((train_array.reshape(train_array.shape[0], -1))#columns=branches)
         ## save data frame object as hdf5 objects as they are much faster to manipulate
-        outfile = "ntuples/HDF5/"+ fname[:-5] + ".h5"
+        outfile = "./hdf5s/TrainingBRT/"+ self.filename[:-5] + ".h5"
         if os.path.exists(outfile):
             logger.warn(" %s already exists"% outfile)
             raise Exception()
-
         logger.info("Creating %s"% outfile)
         store = pd.HDFStore(outfile)
         store['train']= df
         store.close()
 
+## Make sure this script has not been import as a module to another script
+if __name__ == '__main__':
+    from ditaumassskl.parallel import run_pool
+    parser1 =ArgumentParser()
+    parser1.add_argument('files',  nargs='+')
+    args = parser1.parse_args()
+    jobs = [Job(f) for f in args.files]
+    run_pool(jobs, n_jobs=-1)

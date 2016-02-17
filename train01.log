@@ -1,0 +1,67 @@
+INFO:DiTauMass] Opening ./ntuples/TrainingBRT/reco_vbf_60_train.root
+INFO:DiTauMass] Opening ./ntuples/TrainingBRT/reco_vbf_65_train.root
+INFO:DiTauMass] Opening ./ntuples/TrainingBRT/reco_vbf_70_train.root
+INFO:DiTauMass] Opening ./ntuples/TrainingBRT/reco_vbf_75_train.root
+INFO:DiTauMass] Opening ./ntuples/TrainingBRT/reco_vbf_80_train.root
+INFO:DiTauMass] Opening ./ntuples/TrainingBRT/reco_vbf_85_train.root
+INFO:DiTauMass] Opening ./ntuples/TrainingBRT/reco_vbf_90_train.root
+INFO:DiTauMass] Opening ./ntuples/TrainingBRT/reco_vbf_95_train.root
+INFO:DiTauMass] Opening ./ntuples/TrainingBRT/reco_vbf_100_train.root
+INFO:DiTauMass] Opening ./ntuples/TrainingBRT/reco_vbf_105_train.root
+INFO:DiTauMass] Opening ./ntuples/TrainingBRT/reco_vbf_110_train.root
+INFO:DiTauMass] Opening ./ntuples/TrainingBRT/reco_vbf_115_train.root
+INFO:DiTauMass] Opening ./ntuples/TrainingBRT/reco_vbf_120_train.root
+INFO:DiTauMass] Opening ./ntuples/TrainingBRT/reco_vbf_125_train.root
+INFO:DiTauMass] Opening ./ntuples/TrainingBRT/reco_vbf_130_train.root
+INFO:DiTauMass] Opening ./ntuples/TrainingBRT/reco_vbf_135_train.root
+INFO:DiTauMass] Opening ./ntuples/TrainingBRT/reco_vbf_140_train.root
+INFO:DiTauMass] Opening ./ntuples/TrainingBRT/reco_vbf_145_train.root
+INFO:DiTauMass] Opening ./ntuples/TrainingBRT/reco_vbf_150_train.root
+INFO:DiTauMass] Opening ./ntuples/TrainingBRT/reco_vbf_155_train.root
+INFO:DiTauMass] Opening ./ntuples/TrainingBRT/reco_vbf_160_train.root
+INFO:DiTauMass] Opening ./ntuples/TrainingBRT/reco_vbf_165_train.root
+INFO:DiTauMass] Opening ./ntuples/TrainingBRT/reco_vbf_170_train.root
+INFO:DiTauMass] Opening ./ntuples/TrainingBRT/reco_vbf_175_train.root
+INFO:DiTauMass] Opening ./ntuples/TrainingBRT/reco_vbf_180_train.root
+INFO:DiTauMass] Opening ./ntuples/TrainingBRT/reco_vbf_185_train.root
+INFO:DiTauMass] Opening ./ntuples/TrainingBRT/reco_vbf_190_train.root
+INFO:DiTauMass] Opening ./ntuples/TrainingBRT/reco_vbf_195_train.root
+INFO:DiTauMass] Opening ./ntuples/TrainingBRT/reco_vbf_200_train.root
+INFO:DiTauMass] Opening ./ntuples/TrainingBRT/reco_gg_60_train.root
+INFO:DiTauMass] Opening ./ntuples/TrainingBRT/reco_gg_65_train.root
+INFO:DiTauMass] Opening ./ntuples/TrainingBRT/reco_gg_70_train.root
+INFO:DiTauMass] Opening ./ntuples/TrainingBRT/reco_gg_75_train.root
+INFO:DiTauMass] Opening ./ntuples/TrainingBRT/reco_gg_80_train.root
+INFO:DiTauMass] Opening ./ntuples/TrainingBRT/reco_gg_85_train.root
+INFO:DiTauMass] Opening ./ntuples/TrainingBRT/reco_gg_90_train.root
+INFO:DiTauMass] Opening ./ntuples/TrainingBRT/reco_gg_95_train.root
+INFO:DiTauMass] Opening ./ntuples/TrainingBRT/reco_gg_100_train.root
+INFO:DiTauMass] Opening ./ntuples/TrainingBRT/reco_gg_105_train.root
+INFO:DiTauMass] Opening ./ntuples/TrainingBRT/reco_gg_110_train.root
+INFO:DiTauMass] Opening ./ntuples/TrainingBRT/reco_gg_115_train.root
+INFO:DiTauMass] Opening ./ntuples/TrainingBRT/reco_gg_120_train.root
+INFO:DiTauMass] Opening ./ntuples/TrainingBRT/reco_gg_125_train.root
+INFO:DiTauMass] Opening ./ntuples/TrainingBRT/reco_gg_130_train.root
+INFO:DiTauMass] Opening ./ntuples/TrainingBRT/reco_gg_135_train.root
+INFO:DiTauMass] Opening ./ntuples/TrainingBRT/reco_gg_140_train.root
+INFO:DiTauMass] Opening ./ntuples/TrainingBRT/reco_gg_145_train.root
+INFO:DiTauMass] Opening ./ntuples/TrainingBRT/reco_gg_150_train.root
+INFO:DiTauMass] Opening ./ntuples/TrainingBRT/reco_gg_155_train.root
+INFO:DiTauMass] Opening ./ntuples/TrainingBRT/reco_gg_160_train.root
+INFO:DiTauMass] Opening ./ntuples/TrainingBRT/reco_gg_165_train.root
+INFO:DiTauMass] Opening ./ntuples/TrainingBRT/reco_gg_170_train.root
+INFO:DiTauMass] Opening ./ntuples/TrainingBRT/reco_gg_175_train.root
+INFO:DiTauMass] Opening ./ntuples/TrainingBRT/reco_gg_180_train.root
+INFO:DiTauMass] Opening ./ntuples/TrainingBRT/reco_gg_185_train.root
+INFO:DiTauMass] Opening ./ntuples/TrainingBRT/reco_gg_190_train.root
+INFO:DiTauMass] Opening ./ntuples/TrainingBRT/reco_gg_195_train.root
+INFO:DiTauMass] Opening ./ntuples/TrainingBRT/reco_gg_200_train.root
+INFO:DiTauMass] elapsed time for preparing training data sets: 6.9450 seconds
+INFO:DiTauMass] {'n_estimators': 100, 'loss': 'square', 'base_estimator': DecisionTreeRegressor(criterion='mse', max_depth=None, max_features=None,
+           max_leaf_nodes=None, min_samples_leaf=200, min_samples_split=2,
+           min_weight_fraction_leaf=0.02, presort='auto',
+           random_state=None, splitter='best'), 'random_state': None, 'learning_rate': 1.0}
+INFO:DiTauMass] Training BRT ... 
+INFO:DiTauMass] elapsed time for training on 14 features over 877624 events: 13578.3197541 seconds 
+INFO:DiTauMass]  saved trained model to disk: ./RESULTS/01082016_AdaBoostRegressor_VBF_truth.pkl
+[?1034h

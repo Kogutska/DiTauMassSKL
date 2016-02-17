@@ -1,6 +1,8 @@
 # from .common import *
 # from .mva import *
 
+MMC_MASS = "ditau_mmc_mlnu3p_m"
+Coll_MASS = "ditau_coll_approx_m"
 
 # CATEGORIES = {
 #     # Preselection

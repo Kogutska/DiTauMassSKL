@@ -21,7 +21,7 @@ TAU2_PT = Cut('ditau_tau1_pt > 15.')
 MET = Cut('met_et > 20.') ## evtsel_MET 
 DR_TAUS = Cut('0.8 < ditau_dr< 2.4')
 DETA_TAUS = Cut('ditau_deta < 1.5')
-DPHI_MIN_TAUS_MET = Cut ('ditau_met_min_dphi< {}'.format( pi / 4))
+DPHI_MIN_TAUS_MET = Cut ('ditau_met_min_dphi< %0.2f'%( pi / 4))
 
 ## LEPHAD specific cuts
 MT = Cut('transverse_mass_tau1_tau2 < 70000')

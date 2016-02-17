@@ -1,0 +1,119 @@
+#! /usr/bin/env python
+""" main deriver for producing validation plots.
+"""
+import subprocess
+import pickle
+from rootpy.tree import Cut                                                                   
+
+## local
+from ditaumassskl.categories.mva import (Category_Preselection, 
+                                         Category_Boosted,
+                                         Category_VBF) 
+from ditaumassskl.features import *
+from ditaumassskl.prepare_data import Sample
+from ditaumassskl.plotting.mass_shape import *
+from ditaumassskl.plotting.calib_curve import *
+from ditaumassskl.plotting.roc_curve import *
+
+from argparse import ArgumentParser
+parser = ArgumentParser()
+parser.add_argument('--mass_shape', type=str, default='yes', choices=['yes', 'no'])
+parser.add_argument('--sig_bkg', type=str, default='yes', choices=['yes', 'no'])
+parser.add_argument('--plot_roc', type=str, default='yes', choices=['yes', 'no'])
+parser.add_argument('--calib_curve', type=str, default='yes', choices=['yes', 'no'])
+parser.add_argument('--plot_book', type=str, default='yes', choices=['yes', 'no'])
+args = parser.parse_args()
+    
+
+## branches to read to memory
+branches = branches + estimators
+features = features 
+
+## testing level cuts
+common_cuts = Category_Preselection.common_cuts
+vbf_cuts = Category_VBF.cuts & common_cuts
+gg_cuts = Category_Boosted.cuts & common_cuts
+cuts = "(dita u_tau1_matched_isHadTau==1) && (ditau_tau0_matched_isHadTau==1) && (parent_pt > 100)&& ditau_mmc_mlnu3p_m > 0"
+# z_train_cuts = "(ditau_tau1_matched_isHadTau==1) && (ditau_tau0_matched_isHadTau==1)  && (parent_pt > 100)&& ditau_mmc_mlnu3p_m > 0 && (parent_m > 80) && (parent_m < 100)"
+
+## trained model
+model_name= "01082016_AdaBoostRegressor_VBF_truth"
+#"12032015_GradientBoostingRegressor_reco_mix_hh"
+model= "./RESULTS/"+model_name+".pkl"
+
+## output prefix for plots
+outprefix = model_name
+
+if args.mass_shape=='yes':
+    masses = range(100, 155, 5)
+    sample = Sample(ntuples_path="./ntuples/TestingBRT/HH/", masses=masses, suffix='test_v0')
+    files  = sample.get_files()  
+    for m, f in zip (masses, files):
+        df= sample.get_dframe([f],branches=branches,cuts=cuts)
+        brt_in= df.reindex(columns=features)
+        with open(model,'rb') as f:
+            regressor = pickle.load(f)
+            f.close()
+
+        ## calculate BRT mass.
+        brt_mass= regressor.predict(brt_in)
+        plot_mass(brt_mass, true_mass=m, category= 'gg', prefix=outprefix)
+
+        del df, brt_in
+    
+if args.sig_bkg=='yes':
+    ## prepare H125 samples
+    sample = Sample()
+    hpath = ["./ntuples/TestingBRT/HH/reco_gg_125_test_v0.root"]
+    df_h = sample.get_dframe(hpath,branches=branches,cuts=cuts)
+    data_h= df_h.reindex(columns=features)
+    
+    ## prepare Z samples
+    zpath = ["./ntuples/TestingBRT/HH/reco_Z_90_test_v0.root"]
+    df_z = sample.get_dframe(zpath, branches=branches,cuts=cuts)
+    data_z = df_z.reindex(columns=features)
+    
+    ##  load saved model
+    with open(model,'rb') as f:
+        regressor = pickle.load(f)
+        f.close()
+    ## calculate BRT mass.
+    BRT_z= regressor.predict(data_z)
+    BRT_h=regressor.predict(data_h)
+    compare_mass(BRT_h, BRT_z, estimator="BRT", prefix=outprefix)
+        
+    MMC_h = df_h.reindex(columns=['ditau_mmc_mlnu3p_m']).ix[:,0]
+    MMC_z = df_z.reindex(columns=['ditau_mmc_mlnu3p_m']).ix[:,0]
+    compare_mass(MMC_h, MMC_z, estimator = 'MMC', prefix=outprefix)
+        
+    if args.plot_roc=='yes':
+        ## plot roc curve
+        brt_eff =cal_roc(BRT_z, BRT_h)
+        mmc_eff = cal_roc(MMC_z, MMC_h)
+        plot_roc_curve(brt_eff, mmc_eff, category='gg', prefix=outprefix)
+            
+if args.calib_curve=='yes':  
+    ## plot calib_curve
+    masses = range(100, 155, 5)
+    samples= Sample(ntuples_path="./ntuples/TestingBRT/HH/",
+                    masses =masses,
+                    suffix='test_v0')
+    plot_calib_curve(samples,
+                     brt_model=model,
+                     branches=branches,
+                     features=features,
+                     cuts=cuts, 
+                     prefix = outprefix)
+
+
+
+if args.plot_book=='yes':
+   
+    subprocess.call(['montage',
+                     '-tile',
+                     '2x2',
+                     '-geometry',
+                     '1800',
+                     model_name+'*.png',
+                     model_name+'.pdf'],
+                    shell=True)

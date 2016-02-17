@@ -1,6 +1,6 @@
 
 ## reco level training; goal is to predict Higgs mass.
-features = ['ditau_dr',
+branches = ['ditau_dr',
             'met_et',
             'ditau_scal_sum_pt',
             'ditau_vect_sum_pt',
@@ -14,6 +14,12 @@ features = ['ditau_dr',
             'ditau_met_min_dphi',
             'ditau_met_lep0_cos_dphi',
             'ditau_met_lep1_cos_dphi',
+            'parent_m'
             ]
-
+## last one is the target
+features= branches[:-1]
 target = ["parent_m"]
+
+estimators = ['ditau_mmc_mlnu3p_m',
+              'ditau_mosaic_mH',
+              ]

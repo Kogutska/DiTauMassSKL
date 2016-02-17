@@ -3,20 +3,23 @@ from rootpy.tree import Cut
 from math import pi
 
 from .base import Category
-from .. import MMC_MASS
-from .. import Coll_MASS
-# All basic cut definitions are here
+from . import MMC_MASS
+from . import Coll_MASS
 
+## hadhad specific
 TAU1_MEDIUM = Cut('ditau_tau0_jet_bdt_tight==1')
 TAU2_MEDIUM = Cut('ditau_tau1_jet_bdt_medium==1')
 TAU1_TIGHT = Cut('ditau_tau0_jet_bdt_medium==1')
 TAU2_TIGHT = Cut('ditau_tau1_jet_bdt_tight==1')
+TAU1_TRUTH_MATCH = Cut('ditau_tau0_matched_isHadTau==1')
+TAU2_TRUTH_MATCH = Cut('ditau_tau1_matched_isHadTau==1')
 
+TRUTH_MATCH = TAU1_TRUTH_MATCH & TAU2_TRUTH_MATCH
 ID_MEDIUM = TAU1_MEDIUM & TAU2_MEDIUM
 ID_TIGHT = TAU1_TIGHT & TAU2_TIGHT
 ID_MEDIUM_TIGHT = (TAU1_MEDIUM & TAU2_TIGHT) | (TAU1_TIGHT & TAU2_MEDIUM)
 
-## LEPHAD basic cut definitions, tau1 is hadronic and tau2 is lepton-- LH Brnches names are different Be carefull 
+## lephad specific
 TAU_MEDIUM = Cut('evtsel_tau_is_Medium')
 TAU_Positive = Cut('tau1_q ==1')
 TAU_Negative = Cut('tau1_q ==-1')
@@ -57,8 +60,7 @@ DETA_TAUS = Cut('ditau_deta< 1.5')
 DETA_TAUS_CR = Cut('ditau_deta> 1.5')
 
 H_Pt = 100
-RESONANCE_PT = Cut('parent_pt > {}'.format(H_Pt))
-
+RESONANCE_PT = Cut('parent_pt > %i'%H_Pt)
 
 
 ## LEPHAD specific cuts:
@@ -66,13 +68,11 @@ TAU_PT = Cut('tau1_pt > 20.')
 LEP_PT = Cut('tau2_pt > 12.')
 MT = Cut('transverse_mass_tau1_tau2 < 70')
 
-DPHI_MIN_TAUS_MET = Cut ('ditau_met_min_dphi <{}'.format( pi / 4))
+DPHI_MIN_TAUS_MET = Cut ('ditau_met_min_dphi <%0.2f'% (pi / 4))
 # use .format() to set centality value
 MET_CENTRALITY = 'MET_bisecting || (dPhi_min_tau_MET < {0})'
 
-# common preselection cuts
-
-
+## hadhad preselection cuts
 PRESELECTION = (
     LEAD_TAU_35 & SUBLEAD_TAU_25
     & ID_MEDIUM_TIGHT
@@ -86,7 +86,7 @@ PRESELECTION = (
     )
 
 
-## LEPHAD Cuts
+## lephad preselection cuts
 PRESELECTION_LH =(
     TAU_MEDIUM_LEP_ISO 
     & TAU_PT
@@ -96,7 +96,6 @@ PRESELECTION_LH =(
     & Cut('%s > 0' % MMC_MASS)
     & Cut('%s > 0' % Coll_MASS)
     )
-
 
 CUTS_VBF_LH = (
     CUTS_2J

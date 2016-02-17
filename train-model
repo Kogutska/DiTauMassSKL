@@ -1,4 +1,4 @@
-#! /usr/bin/env python2.6
+#! /usr/bin/env python
 
 ## python imports
 import os
@@ -7,40 +7,63 @@ import pandas as pd
 import numpy as np
 import matplotlib as mpl
 import matplotlib.pyplot as plt
-import pandas.core.common as com
-from pandas.core.index import Index
-from pandas.tools import plotting
-from pandas.tools.plotting import scatter_matrix
-
+import pickle
+from time import time
 
 ## sklearn imports
-from sklearn import datasets
-from sklearn.metrics import classification_report, roc_auc_score
-from sklearn.tree import DecisionTreeRegressor
-from sklearn.ensemble import AdaBoostRegressor
+# from sklearn import tree
+# from sklearn.tree import DecisionTreeRegressor, ExtraTreeRegressor
+# from sklearn.ensemble import AdaBoostRegressor, ExtraTreesRegressor, RandomForestRegressor 
 
 ## local imports
-from logs import *
-from ditaumassskl import features
+from ditaumassskl.regressor import Regressor
+from ditaumassskl import MASSES, date, parser
+from ditaumassskl.features import branches, features, target
+from ditaumassskl.prepare_data import Sample
+from ditaumassskl import log
+#parser.add_argument("--meta-clf", type=str, default=[])
+args = parser.parse_args()
 
-## two alternative ways to read the h5 file and create the training sample
-#store = pd.HDFStore("./ntuples/HDF5/reco_gg_100_train.h5")
+## prepare training data
+intime= time()
+#MASSES.remove(90)
+samples= Sample(ntuples_path= "./ntuples/TrainingBRT/", masses= MASSES, mode= 'mix', level='reco', suffix='train')
+train_cuts= "(ditau_tau1_matched_isHadTau==1) && (ditau_tau0_matched_isHadTau==1)" #&& (parent_pt > 100)"
+fpaths = samples.get_files()
+train_data = samples.get_dframe(fpaths,branches=branches,cuts=train_cuts)
 
-train_df = pd.read_hdf("./ntuples/HDF5/reco_gg_60_train.h5")
-for fname in os.listdir("ntuples/HDF5/"):
-    if not "gg_60" in fname:
-        train_df = pd.read_hdf("./ntuples/HDF5/"+fname)
-        logger.info("Adding sample of size {0}".format(train_df.shape))        
-        train_df.append(train_df)
-        
-target_df = train_df['ditau_dr']
-print len(train_df)
-## print DataFrame object's shape to make sure it's right for the training
-logger.info("Trainig sample of shape {0} and target of shape {1}".format(train_df.shape, target_df.shape))
+## training with Z instead of H90
+#z_train_cuts = "(ditau_tau1_matched_isHadTau==1) && (ditau_tau0_matched_isHadTau==1) && (parent_m > 80) && (parent_m < 100)"
+# zpath = ["./ntuples/TrainingBRT/ZZ/reco_Z_90_train.root"]
+# data_Z = samples.get_dframe(zpath,branches=branches,cuts=z_train_cuts) 
+# frames =[data_H, data_Z]
+# train_data = pd.concat(frames) 
 
-## train model
-# regressor = AdaBoostRegressor(DecisionTreeRegressor(max_depth=10, min_samples_leaf=500),
-#                               n_estimators=100)
-# regressor.fit(train_df, target_df)
-# #res =regressor.predict(test_df)
+## prepare features and targets
+features = features
+target= target
+ftime = time()
+log.info ("elapsed time for preparing training data sets: %0.4f seconds"%(ftime-intime))
 
+intime = time()
+## book base and meta classifier
+## AdaBoostRegressor,BaggingRegressor, ExtraTreesRegressor, GradientBoostingRegressor, RandomForestRegressor
+regressor = Regressor()
+base_name = 'DecisionTreeRegressor'
+base_clf = regressor.book_base_clf(base_name=base_name)
+meta_name = "AdaBoostRegressor" 
+meta_clf = regressor.book_meta_clf( meta_name=meta_name, n_estimators = 100)
+#regressor.book_meta_clf(meta_name=meta_name)
+
+model = regressor.train(train_data, features, target, meta_clf)
+## train clf
+ftime=time()
+log.info ("elapsed time for training on {0} features over {1} events: {2} seconds "
+          .format(len(features), train_data.shape[0], ftime-intime)) 
+
+## save model
+model_name= "./RESULTS/" + str(date)+"_"+ meta_name +"_"+ args.train_mode +'_'+ args.train_level +".pkl"
+with open (model_name,"wb") as f:
+    pickle.dump(model,f) 
+    f.close() 
+log.info(" saved trained model to disk: %s"%model_name)
