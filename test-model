@@ -1,76 +1,108 @@
 #! /usr/bin/env python
 """ main deriver for producing validation plots.
 """
-import subprocess
+import subprocess, os
+import logging
 import pickle
-from rootpy.tree import Cut                                                                   
+from time import time       
+from rootpy.tree import Cut
+log=logging.getLogger(os.path.basename((__file__)))                     
 
 ## local
-from ditaumassskl.categories.mva import (Category_Preselection, 
-                                         Category_Boosted,
-                                         Category_VBF) 
-from ditaumassskl.features import *
-from ditaumassskl.prepare_data import Sample
+from ditaumassskl.categories.hadhad.mva import (Category_Preselection, 
+                                                Category_Boosted,
+                                                Category_VBF) 
+from ditaumassskl.categories.lephad.mva import (Category_Preselection_lh, 
+                                         Category_Boosted_lh,
+                                         Category_VBF_lh) 
+from ditaumassskl.categories.features import *
+from ditaumassskl.samples.higgs import Higgs
 from ditaumassskl.plotting.mass_shape import *
 from ditaumassskl.plotting.calib_curve import *
 from ditaumassskl.plotting.roc_curve import *
 
-from argparse import ArgumentParser
-parser = ArgumentParser()
-parser.add_argument('--mass_shape', type=str, default='yes', choices=['yes', 'no'])
-parser.add_argument('--sig_bkg', type=str, default='yes', choices=['yes', 'no'])
-parser.add_argument('--plot_roc', type=str, default='yes', choices=['yes', 'no'])
-parser.add_argument('--calib_curve', type=str, default='yes', choices=['yes', 'no'])
-parser.add_argument('--plot_book', type=str, default='yes', choices=['yes', 'no'])
+from ditaumassskl import parser,base_regs,meta_regs
+parser.add_argument('-m','--mass_shape',action='store_true')
+parser.add_argument('-sb','--sig_bkg', action='store_true')
+parser.add_argument('-roc','--plot_roc', action='store_true')
+parser.add_argument('-cal','--calib_curve', action='store_true')
+parser.add_argument('-bs','--boosts', action='store_true')
+parser.add_argument('-plb','--plot_book', action='store_true')
+parser.add_argument('-sz','--sample_size', action='store_true')
+parser.add_argument('-ne','--nevts', default=None) 
 args = parser.parse_args()
     
-
 ## branches to read to memory
-branches = branches + estimators
-features = features 
-
-## testing level cuts
-common_cuts = Category_Preselection.common_cuts
-vbf_cuts = Category_VBF.cuts & common_cuts
-gg_cuts = Category_Boosted.cuts & common_cuts
-cuts = "(dita u_tau1_matched_isHadTau==1) && (ditau_tau0_matched_isHadTau==1) && (parent_pt > 100)&& ditau_mmc_mlnu3p_m > 0"
-# z_train_cuts = "(ditau_tau1_matched_isHadTau==1) && (ditau_tau0_matched_isHadTau==1)  && (parent_pt > 100)&& ditau_mmc_mlnu3p_m > 0 && (parent_m > 80) && (parent_m < 100)"
+if args.channel=='hh':
+    features = HH_FEATURES
+    target   = TARGET
+    branches = HH_FEATURES+TARGET+HH_MASS_PREDICTORS+HH_CUT_BRANCHES
+    mmc=HH_MASS_PREDICTORS[0]
+    if args.test_mode=='vbf':
+        category=Category_VBF()
+    elif args.test_mode=='gg':
+        category=Category_Boosted()
+    
+    cuts= (Category_Preselection.common_cuts & category.cuts).where()
+    
+elif args.channel=='lh':
+    features = LH_FEATURES
+    target   = TARGET
+    branches = LH_FEATURES+TARGET + LH_MASS_PREDICTORS+LH_CUT_BRANCHES
+    mmc=LH_MASS_PREDICTORS[0]
+    if args.test_mode=='vbf':
+        category=Category_VBF_lh()
+    elif args.test_mode=='gg':
+        category=Category_Boosted_lh()
+    cuts=(Category_Preselection_lh.common_cuts& category.cuts).where()#Cut('lephad_vect_sum_pt > 100') &Cut('is_boosted_mva==1')  
 
 ## trained model
-model_name= "01082016_AdaBoostRegressor_VBF_truth"
-#"12032015_GradientBoostingRegressor_reco_mix_hh"
-model= "./RESULTS/"+model_name+".pkl"
+log.info('branches to read to memory: {}'.format(branches))
+log.info('Cuts applied on testing samples: {}'.format(cuts))
 
+model_name='_'.join([args.train_id,
+                     meta_regs[args.meta_reg],
+                     args.train_mode,
+                     args.train_level,
+                     args.channel,
+                     str(args.nevts)])
+
+model= "./RESULTS/"+model_name+".pkl"
 ## output prefix for plots
 outprefix = model_name
 
-if args.mass_shape=='yes':
-    masses = range(100, 155, 5)
-    sample = Sample(ntuples_path="./ntuples/TestingBRT/HH/", masses=masses, suffix='test_v0')
-    files  = sample.get_files()  
-    for m, f in zip (masses, files):
-        df= sample.get_dframe([f],branches=branches,cuts=cuts)
+#lable to be added on plots
+ch_tag=r'$H\rightarrow \tau_{l}\tau_{h}$'
+tt_tag='\nTrained on: {0}H \nTested on: {1}H\n'.format(args.train_mode, args.test_mode)
+label=ch_tag+tt_tag
+   
+PATH=PATH='/home/sbahrase/WorkDesk/SAMPLES/nTUPLEs/xTau75/test_brt/'
+log.info('loading trained model %s'%model_name)
+if args.mass_shape :
+    masses = range(105, 155, 5)
+    for m in masses:
+        higgs= Higgs(ntuple_path=PATH+args.channel+'/',mass=m,mode=args.test_mode,level='reco',suffix='test')
+        df= higgs.get_dframe(branches=branches,cuts=cuts)
         brt_in= df.reindex(columns=features)
         with open(model,'rb') as f:
             regressor = pickle.load(f)
-            f.close()
-
+            
         ## calculate BRT mass.
-        brt_mass= regressor.predict(brt_in)
-        plot_mass(brt_mass, true_mass=m, category= 'gg', prefix=outprefix)
-
+        brt_mass = regressor.predict(brt_in)
+        plot_mass(brt_mass, true_mass=m, category=category, prefix=outprefix)
+        
+        
         del df, brt_in
     
-if args.sig_bkg=='yes':
+if args.sig_bkg :
     ## prepare H125 samples
-    sample = Sample()
-    hpath = ["./ntuples/TestingBRT/HH/reco_gg_125_test_v0.root"]
-    df_h = sample.get_dframe(hpath,branches=branches,cuts=cuts)
+    h125= Higgs(ntuple_path=PATH+args.channel+'/',mass=125,mode=args.test_mode,level='reco',suffix='test')
+    df_h= h125.get_dframe(branches=branches,cuts=cuts)
     data_h= df_h.reindex(columns=features)
-    
+    print cuts
     ## prepare Z samples
-    zpath = ["./ntuples/TestingBRT/HH/reco_Z_90_test_v0.root"]
-    df_z = sample.get_dframe(zpath, branches=branches,cuts=cuts)
+    z90= Higgs(ntuple_path=PATH+args.channel+'/',mass=90,mode='Z',level='reco',suffix='test')
+    df_z= z90.get_dframe(branches=branches,cuts=cuts) 
     data_z = df_z.reindex(columns=features)
     
     ##  load saved model
@@ -79,36 +111,90 @@ if args.sig_bkg=='yes':
         f.close()
     ## calculate BRT mass.
     BRT_z= regressor.predict(data_z)
+    t1 = time()
     BRT_h=regressor.predict(data_h)
-    compare_mass(BRT_h, BRT_z, estimator="BRT", prefix=outprefix)
-        
-    MMC_h = df_h.reindex(columns=['ditau_mmc_mlnu3p_m']).ix[:,0]
-    MMC_z = df_z.reindex(columns=['ditau_mmc_mlnu3p_m']).ix[:,0]
-    compare_mass(MMC_h, MMC_z, estimator = 'MMC', prefix=outprefix)
-        
-    if args.plot_roc=='yes':
+    t2=time()
+    dt=t2-t1
+    nevts=data_h.shape[0]
+    log.info('Time elapsed to calculate BRT per event: {}'.format(dt/nevts))
+    compare_mass(BRT_h, BRT_z, estimator="BRT", label=label, category=category,prefix=outprefix)
+    MMC_h = df_h.reindex(columns=[mmc]).ix[:,0]
+    MMC_z = df_z.reindex(columns=[mmc]).ix[:,0]
+    compare_mass(MMC_h, MMC_z, estimator = 'MMC',category=category,prefix=outprefix)
+    
+    # mosaic
+    # MS_h = df_h.reindex(columns=['ditau_mosaic_mH_m6']).ix[:,0]
+    # MS_z = df_z.reindex(columns=['ditau_mosaic_mH_m6']).ix[:,0]
+    # compare_mass(MS_h, MS_z, estimator = 'Mosaic', prefix=outprefix)
+    
+    if args.plot_roc :
         ## plot roc curve
         brt_eff =cal_roc(BRT_z, BRT_h)
         mmc_eff = cal_roc(MMC_z, MMC_h)
-        plot_roc_curve(brt_eff, mmc_eff, category='gg', prefix=outprefix)
-            
-if args.calib_curve=='yes':  
+        #mosaic_eff= cal_roc(MS_z,MS_h)
+        plot_roc_curve(brt_eff, mmc=mmc_eff,category=category,label=label,prefix=outprefix)
+
+if args.calib_curve :  
     ## plot calib_curve
     masses = range(100, 155, 5)
-    samples= Sample(ntuples_path="./ntuples/TestingBRT/HH/",
-                    masses =masses,
-                    suffix='test_v0')
-    plot_calib_curve(samples,
+    higgs_array=[]
+    for m in masses:
+         higgs= Higgs(ntuple_path=PATH+args.channel+'/',mass=m,
+                        mode=args.test_mode,level=args.test_level,suffix='test')
+         higgs_array.append(higgs)
+    category_pre=Category_Preselection
+    plot_calib_curve(higgs_array,
                      brt_model=model,
                      branches=branches,
                      features=features,
                      cuts=cuts, 
+                     category=category,
                      prefix = outprefix)
 
 
+if args.boosts:
+    regs=['grb', 'ada', 'ext']
+    models={}
+    boosts={}
+    for reg in regs:
+        models[meta_regs[reg]]=('./RESULTS/'+'_'.join([args.train_id,
+                                                       meta_regs[reg],
+                                                       args.train_mode,
+                                                       args.train_level,
+                                                       args.channel,
+                                                       str(args.nevts)])
+                                +'.pkl')        
+    print models
+    ## prepare H125 samples
+    h125= Higgs(ntuple_path=PATH+args.channel+'/',mass=125,mode=args.test_mode,level='reco',suffix='test')
+    df_h= h125.get_dframe(branches=branches,cuts=cuts)
+    data_h= df_h.reindex(columns=features)
+    
+    ## prepare Z samples
+    z90= Higgs(ntuple_path=PATH+args.channel+'/',mass=90,mode='Z',level='reco',suffix='test')
+    df_z= z90.get_dframe(branches=branches,cuts=cuts) 
+    data_z = df_z.reindex(columns=features)
+    
+    
+    for name, model in models.items():
+        with open(model,'rb') as f:
+            regressor = pickle.load(f)
+            f.close()
+    ## calculate BRT mass.
+        BRT_z= regressor.predict(data_z)
+        BRT_h=regressor.predict(data_h)
+        brt_eff =cal_roc(BRT_z, BRT_h)
+        boosts[name]=brt_eff
+    compare_brts(boosts,label=label, category=presel)
 
-if args.plot_book=='yes':
-   
+if args.sample_size:
+    size=[0.5, 1. , 2., 3., 4., 5., 6., 7., 8., 9., 10., 12., 14.]
+    area=[0.8774, 0.8840, 0.8880, 0.8863, 0.8920, 0.8936,
+          0.8903, 0.8919, 0.8945, 0.8909, 0.8920, 0.8930,
+          0.8950]
+    plot_size_dependency(size, area)
+
+if args.plot_book:   
     subprocess.call(['montage',
                      '-tile',
                      '2x2',

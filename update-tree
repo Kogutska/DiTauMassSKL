@@ -1,0 +1,193 @@
+#! /usr/bin/env python
+import os
+import shutil
+import math
+from multiprocessing import Process
+import logging
+import ROOT
+from ROOT import TTree, TFile
+## rootpy imports
+from rootpy.io import root_open
+from rootpy.tree import TreeModel, FloatCol, IntCol
+from rootpy.stl import vector
+
+
+import ROOT
+import numpy as np
+log=logging.getLogger('Skim')
+
+BRANCHES_LIST=[
+    'ditau_tau0_pt',
+    'ditau_tau0_eta',
+    'ditau_tau0_phi',
+    'ditau_tau0_m',
+    'ditau_tau1_pt',
+    'ditau_tau1_eta',
+    'ditau_tau1_phi',
+    'ditau_tau1_m',
+    
+    'jet_0_pt',
+    'jet_0_eta',
+    'jet_0_phi',
+    'jet_0_m',
+    
+    'jet_1_pt',
+    'jet_1_eta',
+    'jet_1_phi',
+    'jet_1_m',
+    
+    'met_et',
+    'met_etx',
+    'met_ety',
+    'met_phi',
+    'met_sumet',
+    'met_sig',
+    
+    # # tau block
+    # 'tau_0_q ':np.zeros(1,dtype=int), 
+    # 'tau_0_n_tracks':np.zeros(1,dtype=int), 
+    # 'tau_0_n_wide_tracks':np.zeros(1,dtype=int), 
+    # 'tau_0_jet_bdt_loose':np.zeros(1,dtype=int), 
+    # 'tau_0_jet_bdt_medium':np.zeros(1,dtype=int), 
+    # 'tau_0_jet_bdt_tight':np.zeros(1,dtype=int), 
+    # 'tau_0_jet_bdt_score', 
+    
+    # 'tau_1_q ':np.zeros(1,dtype=int), 
+    # 'tau_1_n_tracks':np.zeros(1,dtype=int), 
+    # 'tau_1_n_wide_tracks':np.zeros(1,dtype=int), 
+    # 'tau_1_jet_bdt_loose':np.zeros(1,dtype=int), 
+    # 'tau_1_jet_bdt_medium':np.zeros(1,dtype=int), 
+    # 'tau_1_jet_bdt_tight':np.zeros(1,dtype=int), 
+    # 'tau_1_jet_bdt_score', 
+    
+    #'ditau block
+    'ditau_dr',
+    'ditau_dphi',
+    'ditau_dpt',
+    'ditau_deta',
+    'ditau_vis_mass',
+    
+    'ditau_scal_sum_pt',
+    'ditau_vect_sum_pt',
+    'ditau_mt_lep0_met',
+    'ditau_mt_lep1_met',
+    'ditau_met_min_dphi',
+    'ditau_met_lep0_cos_dphi',
+    'ditau_met_lep1_cos_dphi',
+    # resonance block
+    'parent_pt',
+    'paretn_eta',
+    'parent_phi',
+    'paretn_m',
+    ]
+
+
+BRANCHES={}
+for b in BRANCHES_LIST:
+    BRANCHES[b]=FloatCol()
+
+def evaluate_branch(b, event):
+    if b=='ditau_tau0_pt' : return event.true_tau_0_pt_vis;
+    if b=='ditau_tau0_eta': return event.true_tau_0_eta_vis;
+    if b=='ditau_tau0_phi': return event.true_tau_0_phi_vis;
+    if b=='ditau_tau0_m'  : return event.true_tau_0_m_vis;
+    
+    if b=='ditau_tau1_pt':return ;
+    if b=='ditau_tau1_eta':return ;
+    if b=='ditau_tau1_phi':return ;
+    if b=='ditau_tau1_m':return ;
+    
+    if b=='jet_0_pt':return ;
+    if b=='jet_0_eta':return ;
+    if b=='jet_0_phi':return ;
+    if b=='jet_0_m':return ;
+    
+    if b=='jet_1_pt':return ;
+    if b=='jet_1_eta':return ;
+    if b=='jet_1_phi':return ;
+    if b=='jet_1_m':return ;
+    
+    if b=='met_et':return ;
+    if b=='met_etx':return ;
+    if b=='met_ety':return ;
+    if b=='met_phi':return ;
+    if b=='met_sumet':return ;
+    if b=='met_sig':return ;
+    else: return 0
+
+            
+class Model(TreeModel):
+    ditau_mt=FloatCol(default=-11.)
+    ditau_cos_theta=FloatCol(default=-11.)
+    ditau_pt_diff=FloatCol(default=-11.)
+    
+def add_branch(tree):
+    tree.create_buffer()
+    tree.set_buffer(Model(), create_branches=True)
+    b_ditau_mt=tree.GetBranch('ditau_mt')
+    b_ditau_cos_theta=tree.GetBranch('ditau_cos_theta')
+    b_ditau_pt_diff=tree.GetBranch('ditau_pt_diff')    
+    for event in tree:
+        tau0=ROOT.TLorentzVector()
+        tau0.SetPtEtaPhiM(event.ditau_tau0_pt,
+                           event.ditau_tau0_eta,
+                           event.ditau_tau0_phi,
+                           event.ditau_tau0_m)
+        tau1=ROOT.TLorentzVector()
+        tau1.SetPtEtaPhiM(event.ditau_tau1_pt,
+                          event.ditau_tau1_eta,
+                          event.ditau_tau1_phi,
+                          event.ditau_tau1_m)
+        tree.ditau_mt = (tau0+tau1).Mt()
+        b_ditau_mt.Fill()
+        dtheta=math.sqrt((event.ditau_dr)**2 - (event.ditau_deta)**2)
+        tree.ditau_cos_theta=math.cos(dtheta)
+        b_ditau_cos_theta.Fill()
+        if (tau0.Pt()+tau1.Pt())!=0:
+            tree.ditau_pt_diff=(tau0-tau1).Pt()/(tau0.Pt()+tau1.Pt())
+        b_ditau_pt_diff.Fill()
+        
+    tree.SetEntries(-1)
+
+class AddBranch (Process):
+    def __init__(self, filename):
+        super(AddBranch, self).__init__()
+        self.filename = filename
+    
+    def run(self):
+        fname = self.filename
+        path , name = os.path.split(fname)
+        output = os.path.join(path, "new." + name)
+        if os.path.exists(output):
+               raise Exception (" {} already exist here" .format(output))
+        log.info("copying {0} to {1} ...".format(fname, output))
+        shutil.copy(fname, output)
+
+        # with root_open(filename) as test_file:
+        #     test_tree = test_file.Get('NOMINAL')
+        #     ignore_branches = test_tree.glob(branches_to_REMOVE)
+            
+        # chain = TreeChain(
+        #     "NOMINAL",
+        #     files=filename,
+        #  #   filters=event_filters,
+        #     cache=True,
+        #     cache_size=50000000,
+        #     learn_entries=100,
+        #     ignore_branches=ignore_branches)
+
+        with root_open(output, 'UPDATE') as file:
+            tree = file.NOMINAL
+            add_branch(tree)
+            tree.Write(tree.name, ROOT.TObject.kOverwrite)
+
+        
+if __name__ == '__main__':
+    from rootpy.extern.argparse import ArgumentParser
+    parser = ArgumentParser()
+    parser.add_argument('files', nargs='+')
+    args = parser.parse_args()
+
+    from ditaumassskl.parallel import run_pool
+    jobs = [AddBranch(f) for f in args.files]
+    run_pool(jobs, n_jobs=-1)

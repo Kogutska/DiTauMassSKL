@@ -1,0 +1,84 @@
+#!/usr/bin/env python
+# global
+from __future__ import print_function
+from time import time
+import h5py, tables, sys
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.model_selection import train_test_split
+from sklearn.multioutput import MultiOutputRegressor
+
+# local
+from ditaumassskl.categories.features import FEATS_HH_TRUTH, TARGET_HH_TRUTH, HH_FEATURES
+
+# consts
+TRAIN_DATA = "./RecoTrainData.h5"
+nEVENTS = 1000000;
+MAX_DEPTH = 10
+
+# read the h5 file to memory
+h5file = tables.open_file(TRAIN_DATA, 'r', driver="H5FD_CORE")
+
+train_feats = np.zeros((1, len(HH_FEATURES)))
+target_feats = np.zeros((1, len(HH_FEATURES)))
+print("preparing data--->\n")
+print(h5file)
+for g in h5file.walk_groups():
+    print (g)
+#trees = h5file.list_nodes('/Data/') #['reco_gg_100_train', 'reco_gg_105_train', 'reco_gg_115_train']
+sys.exit()
+#for tree in trees:
+    #dataset = h5file.get_node('/', tree)
+    #print("Info on the object:", repr(dataset))
+    # dataset = h5file[tree]
+    # tr_arr = dataset['ditau_deta'][1:10]
+    # tr_arr = [list(item) for item in tr_arr]
+    # tr_arr = np.array(tr_arr)
+    # train_feats = np.concatenate((train_feats, tr_arr))
+    
+    # ## FIX ME
+    # _arr = dataset[HH_FEATURES][1:]
+    # _arr = [list(item) for item in _arr]
+    # _arr = np.array(_arr)
+    # target_feats = np.concatenate((target_feats, _arr))
+    
+    
+# print("data is ready") 
+# X_train, X_test, y_train, y_test = train_test_split(train_feats, target_feats,
+#                                                     train_size=0.99,
+#                                                     random_state=4)
+# print("train & test data are ready") 
+# print("training --->")
+# regr_multirf = MultiOutputRegressor(RandomForestRegressor(max_depth=MAX_DEPTH,
+#                                                           random_state=0), n_jobs=-1)
+# _t0 = time()
+# regr_multirf.fit(X_train, y_train)
+# _dt = time() - _t0
+
+# # print("elapsed time for training %i evts: %0.4f secs"%(nEVENTS, _dt))
+# # print("event rate training:: %0.4f"%(_dt/nEVENTS))
+
+# # # Predict on new data
+# # print ("testing --->")
+# y_multirf = regr_multirf.predict(X_test)
+# # y_rf = regr_rf.predict(X_test)
+
+# # Plot the results
+# fig = plt.figure()
+# s = 50
+# a = 0.4
+# plt.scatter(y_test[:, 0], y_test[:, 1],
+#             c="navy", s=s, marker="s", alpha=a, label="Data")
+# plt.scatter(y_multirf[:, 0], y_multirf[:, 1],
+#             c="cornflowerblue", s=s, alpha=a,
+#             label="Multi RF score=%.2f" % regr_multirf.score(X_test, y_test))
+
+# plt.xlim([50e3, 200e3])
+# plt.ylim([50e3, 200e3])
+# plt.xlabel("target 1")
+# plt.ylabel("target 2")
+# plt.title(" multi-output meta estimator")
+# plt.legend()
+# plt.show()
+# fig.savefig("Multi_20000.eps")

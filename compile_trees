@@ -1,0 +1,34 @@
+#!/usr/bin/env python
+"""
+This module is to traslate sklearn models, saved in pickle files
+to cxx objects, so that we can used trees within c++ codes.
+"""
+
+#<! stdl lib
+import pickle
+import numpy as np
+from argparse import ArgumentParser
+
+#<! local lib
+import compiledtrees
+
+#<! main driver 
+if __name__=="__main__":
+    DEFAULT_MODEL = './RESULTS/03302016_GradientBoostingRegressor_mix_reco_hh_None.pkl'
+    DEFAULT_OUTDIR = './CompiledTrees/'
+    parser = ArgumentParser()
+    parser.add_argument('--model', '-m', type=str, 
+                        help='tranied model pickle file',default=DEFAULT_MODEL)
+    # parser.add_argument('--channel', '-ch', type=str, default='hh',choices=['lh','hh'])
+    parser.add_argument('--out', '-o', type=str, default=DEFAULT_OUTDIR)
+    
+    args = parser.parse_args()
+    
+    with open (args.model, 'rb') as ifile:
+        regressor = pickle.load(ifile)
+        compiled_regressor = compiledtrees.CompiledRegressionPredictor(regressor)
+        ifile.close()
+    # feats = 10*np.ones(shape=(1,14))
+    # mass = compiled_regressor.predict(feats)
+    # print mass
+    # print feats

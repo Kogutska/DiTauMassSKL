@@ -4,3 +4,16 @@ ntuples
 plots
 RESULTS
 *.pyc
+*.root
+*.nn
+*.brt
+*.h5
+*.pyc
+00_plots/
+*.log
+*~
+BRTMassCalculator/
+CompiledTrees/
+trained_models/
+ditaumassskl/categories/hadhad/
+ditaumassskl/categories/lephad/

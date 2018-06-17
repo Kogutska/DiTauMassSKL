@@ -1,0 +1,220 @@
+#! /usr/bin/env python
+""" evaluate Nueral Net trained model.
+"""
+
+import subprocess, sys, os, argparse, pickle
+import numpy as np
+import logging
+log = logging.getLogger(os.path.basename((__file__)))                     
+
+## keras 
+# from keras.models import Sequential, model_from_json, model_from_yaml, save_model
+# from keras.layers import Dense
+# from keras.wrappers.scikit_learn import KerasRegressor
+# from keras.utils import plot_model
+
+from sklearn.model_selection import cross_val_score
+from sklearn.model_selection import KFold
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import Pipeline
+from sklearn.metrics import accuracy_score
+
+
+## ROOT
+import ROOT
+
+## local
+from ditaumassskl.categories.hadhad.mva import (
+    Category_Preselection, 		       
+    Category_Boosted,
+    Category_VBF) 
+from ditaumassskl.categories.lephad.mva import (
+    Category_Preselection_lh, 
+    Category_Boosted_lh,
+    Category_VBF_lh) 
+from ditaumassskl.categories.features import *
+from ditaumassskl.samples.higgs import Higgs
+from ditaumassskl.plotting.mass_shape import *
+from ditaumassskl.plotting.calib_curve import *
+from ditaumassskl.plotting.roc_curve import *
+from ditaumassskl import date, parser, base_regs, meta_regs, scale_data
+
+# # setup command line args
+parser = argparse.ArgumentParser()
+parser.add_argument("--trained_model", "-tm", type=str, help="train models")
+parser.add_argument("action", 
+                    choices=["mass_shape", "sig_bkg", "plot_roc", "calib_curve", "boosts", "plot_book", "sample_size", "do_all"])
+parser.add_argument('-tem','--test_mode',  type=str,default='gg', choices=['gg', 'vbf', 'Z'])
+parser.add_argument('-tel','--test_level', type=str,default='reco', choices=['truth', 'reco'])
+parser.add_argument('-tec','--test_channel', type=str,default='hh', choices=['hh','lh', 'll'])
+parser.add_argument("-kf", "--kfold", action="store_true")
+parser.add_argument("--ntups_path", default="/home/sbahrase/WorkDesk/SAMPLES/nTUPLEs/xTau75/")
+
+args = parser.parse_args()
+
+##-------------------------------------------------------
+## consts
+TRUTH_MATCH = ROOT.TCut("(ditau_tau1_matched_isHadTau==1) && (ditau_tau0_matched_isHadTau==1)")
+LABEL = r'$H\rightarrow \tau_{%s}\tau_{%s}$'%(args.test_channel[0], args.test_channel[1])     
+MODEL_PREFIX = args.trained_model.split("/")[-1].replace(".pkl", "")
+NUM_FOLDS = 5    
+# branches to read to memory
+if args.test_channel=='hh':
+    TRAIN_FEATURES = HH_FEATURES
+    BRANCHES = HH_BRANCES #HH_FEATURES + HH_MASS_PREDICTORS
+    MMC_VAR = "ditau_mmc_mlm_m"
+    CATEGORY = Category_Boosted() 
+    if args.test_mode=='vbf':
+        CATEGORY = Category_VBF()
+    
+elif args.test_channel=='lh':
+    TRAIN_FEATURES = LH_FEATURES
+    BRANCHES = LH_BRANCHES #LH_FEATURES + LH_MASS_PREDICTORS #+LH_CUT_BRANCHES
+    MMC_VAR = "lephad_mmc_mlm_m"
+    CATEGORY = Category_Boosted_lh() 
+    #if args.test_mode=='vbf':
+     #   CATEGORY = Category_VBF_lh()
+
+# trained model
+log.info('branches to read to memory: {}'.format(BRANCHES))
+log.info('Cuts applied on testing samples: {}'.format(CATEGORY.cuts.GetTitle()))
+
+# prepare training data
+MASSES = range(105, 155, 5)
+
+
+##--------------------------------------------------------------
+## load the model
+def load_NN_model(model_name):
+    model = model_from_json(open('%s.json'%model_name).read())
+    model.load_weights('%s.h5'%model_name)
+    model.compile(loss='mean_squared_error', optimizer='adam')
+    return model
+
+##---------------------------------------------------------------
+## get the NN model prediction
+def get_NN_predictions(
+    model_name=args.trained_model,
+    masses=MASSES, 
+    features=TRAIN_FEATURES,
+    category=CATEGORY,
+    mode=args.test_mode,
+    level=args.test_level,
+    channel=args.test_channel,
+    suffix="test",
+    num_folds=5,
+    kfold=args.kfold,
+    ):
+    """
+    Get the predictions from a trained model,
+    
+    Parameter
+    ---------
+    model: keras NN  trained model, 
+    
+    Return
+    ------
+    a dictionary of the predictions
+    """
+    
+    predictions = {mode: {}}
+    cuts_string = (category.cuts).GetTitle()
+    
+    if args.kfold:
+        # MAKE SURE TO USE SAME SEED AS YOU SPLIT IN TRAINING 
+        kfold = KFold(n_splits=NUM_FOLDS)
+        for mass in masses:
+            predictions[mode][mass] = {"MMC":[], "NN":[]}
+            test_sample = Higgs(
+                ntuple_path=os.path.join(args.ntups_path,args.test_channel+'/'),
+                mass=mass,
+                mode=mode,
+                level=args.test_level,
+                suffix='train')
+            log.debug(test_sample.files)
+            test_data = test_sample.get_dframe(branches=BRANCHES, cuts=cuts_string)
+
+            k = 0
+            for train_index, test_index in (kfold.split(test_data)):
+                feats = test_data.reindex(columns=TRAIN_FEATURES).as_matrix()[test_index]
+                target = test_data.reindex(columns=TARGET).as_matrix().ravel()[test_index]
+                model_name = model_name.replace("MOD0", "MOD%i"%k)
+                with open(model_name, "rb") as ifile:
+                    model = pickle.load(ifile)
+                predictions[mode][mass]["NN"].append(model.predict(feats))
+                
+                # get MMC predictions
+                predictions[mode][mass]["MMC"].append(test_data.reindex(columns=[MMC_VAR]).as_matrix().ravel()[test_index])#.ix[:,0])
+                
+                k += 1 #<! go to the next fold
+        
+            # flatten responses
+            predictions[mode][mass]["NN"] = np.concatenate(predictions[mode][mass]["NN"])
+            predictions[mode][mass]["MMC"] = np.concatenate(predictions[mode][mass]["MMC"])
+    else:
+        with open(model_name, "rb") as ifile:
+            model = pickle.load(ifile)
+
+        for mass in masses:
+            predictions[mode][mass] = {}
+            test_sample = Higgs(
+                ntuple_path=os.path.join(args.ntups_path,args.test_channel+'/'),
+                mass=mass,
+                mode=mode,
+                level=args.test_level,
+                suffix='test')
+            log.debug(test_sample.files)
+
+            ## ABSOLUTELY crucial, scale test data as train data
+            test_data = test_sample.get_dframe(branches=BRANCHES, cuts=cuts_string)
+            feats = test_data.reindex(columns=TRAIN_FEATURES).as_matrix()
+            #scaled_feats = scale_data(feats)
+
+            predictions[mode][mass]["NN"] = model.predict(feats)
+
+            # get MMC predictions
+            predictions[mode][mass]["MMC"] = test_data.reindex(columns=[MMC_VAR]).ix[:,0]
+            
+    return predictions
+
+##------------------------------------------------------------------
+## take actions
+if __name__=="__main__":
+    #MODEL_PREFIX = #"%s_kMODEL_%i"%(str(date), len(TRAIN_FEATURES))
+    if (args.action=="calib_curve"):
+        predictions = get_NN_predictions()
+        # do the mass shape plots
+        # for mass in MASSES:
+        #     for st in ["BRT", "MMC"]:
+        #         plot_mass(predictions[args.test_mode][mass][st], true_mass=mass, 
+        #                   category=CATEGORY, prefix=MODEL_PREFIX)
+        
+        plot_calib_curve(MASSES, predictions,
+                         pnames=["NN", "MMC"],
+                         prefix=MODEL_PREFIX,
+                         category=CATEGORY,
+                         label=LABEL)
+        
+    if (args.action=="plot_roc"):
+        h125_est = get_NN_predictions(masses=[125], 
+                                      mode=args.test_mode, 
+                                      suffix="test", 
+                                      ) 
+        z90_est  = get_NN_predictions(masses=[90], 
+                                      mode="Z", 
+                                      suffix="test")
+        
+        # do the mass shape plots
+        for st in ["NN", "MMC"]:
+            compare_mass(h125_est[args.test_mode][125][st], z90_est["Z"][90][st],
+                         estimator=st,category=CATEGORY,prefix=MODEL_PREFIX,
+                         label=LABEL)
+            
+        # do the roc curve 
+        brt_eff = cal_roc(z90_est["Z"][90]["NN"], h125_est[args.test_mode][125]["NN"])
+        mmc_eff = cal_roc(z90_est["Z"][90]["MMC"], h125_est[args.test_mode][125]["MMC"])
+        plot_roc_curve(brt_eff, mmc=mmc_eff, 
+                       category=CATEGORY,prefix=MODEL_PREFIX,
+                       label=LABEL)
+
+    

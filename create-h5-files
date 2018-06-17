@@ -29,12 +29,12 @@ class Job(Process):
     def __init__(self, infile):
         super(Job,self).__init__()
         self.path, self.filename = os.path.split(infile)
-        # self.filename =filename
         
     def run(self):
         logger.info("Opening %s" %os.path.join(self.path,self.filename))
         ## transfer TTree to NumPy array
-        train_array= root2array(os.path.join(self.path, self.filename),selection=selection, treename="NOMINAL")
+        train_array= root2array(os.path.join(self.path, self.filename), 
+                                selection=selection, treename="NOMINAL")
         ## create pandas DataFrame object to manipluate data in an easy way
         df = pd.DataFrame(np.hstack((train_array.reshape(train_array.shape[0], -1))#columns=branches)
         ## save data frame object as hdf5 objects as they are much faster to manipulate

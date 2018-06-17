@@ -1,0 +1,94 @@
+#!/usr/bin/env python
+
+import re, os, sys
+from glob import glob
+import logging
+
+import ROOT
+from rootpy import asrootpy
+from rootpy.io import root_open as ropen
+from rootpy.tree import Tree, TreeChain
+
+class DoesNotExist(Exception):
+    """
+    root TFile , TTree error handler
+    """
+    pass
+
+def update_merged_file(infiles, out_file,
+                       tree_name='NOMINAL',
+                       rm_branches=[]):
+    """
+    add all trees in a dir to a root file.
+    Parameters
+    ----------
+    indir: str; path to the input trees.
+    out_file: str, path to the out tree.
+    intree_name: str; input files Tree name.
+    rm_branches: list, list of brnaches to be ignored.
+    
+    Returns
+    -------
+    single root file contaning all the input Trees.
+    """
+    for f in infiles:
+        intree = ROOT.TChain(tree_name)
+        for br in rm_branches:
+            intree.SetBranchStatus(br, 0)
+        try:
+            ff = ROOT.TFile.Open(f)
+            key = ff.GetKey(tree_name)
+            if key:
+                intree.Add(f)
+            else:
+                log.warning('{0} has no {1} tree'.format(f, tree_name)) 
+                ff.Close()
+        except DoesNotExist:
+            log.warning('{0} has no {1} tree'.format(f, tree_name))
+        print intree.GetEntries()
+
+        with ropen(out_file, 'UPDATE') as outfile:
+            outfile.cd()
+            outtree = intree.CloneTree(-1, "fast SortBasketsByEntry")
+            outtree.OptimizeBaskets()
+            fname = f.split('/')[-1].replace('.root','')
+            outtree.SetName(fname)
+            outtree.Write(outtree.GetName(), ROOT.TObject.kOverwrite)
+    outfile.Close()
+
+# main driver 
+if (__name__ == '__main__'):
+    # argument parser
+    log = logging.getLogger(os.path.basename(__file__))
+    from argparse import ArgumentParser
+    parser = ArgumentParser()
+    parser.add_argument('infiles', nargs='+')
+    parser.add_argument('--reset', action='store_true', default=False)
+    parser.add_argument('-o', '--output', default='outChain.root')
+    args = parser.parse_args()
+    
+    TREE_NAME = "NOMINAL"
+    MC_REMOVE_BRANCHES = [
+        'ditau_matched*',
+        'tau_3*',
+        'tau_2_matched*',
+        'tau_1_matched*',
+        'tau_2*',
+        'ditau_ParticleFlowCombined*',
+        'ditau_tau0_matched*',
+        'ditau_tau1_matched*',
+        'ditau_PanTauCellBased*',
+        'ditau_ConstituentBased*',
+        ]
+    if os.path.exists(args.output):
+        if args.reset:
+            log.warning('Deleting %s' % args.output)
+            os.remove(args.output)
+        else:
+            log.warning(
+                "Output file already exists!. Set --reset to overwrite")
+            sys.exit()
+    update_merged_file(args.infiles, args.output,
+                       tree_name=TREE_NAME,
+                       rm_branches=MC_REMOVE_BRANCHES)
+    

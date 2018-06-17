@@ -1,0 +1,311 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+import os
+import logging
+import datetime
+import pickle
+import matplotlib.pyplot as plt
+import numpy as np
+
+
+## rootpy
+import rootpy
+from rootpy.tree import Cut
+from rootpy import asrootpy
+from rootpy.plotting import Legend
+
+## sklearn 
+from sklearn.feature_selection import (
+    VarianceThreshold, 
+    SelectKBest,
+    SelectFromModel, 
+    )
+from sklearn.ensemble import ExtraTreesClassifier
+
+## local
+from ditaumassskl import *
+from ditaumassskl.variables import HH_VARIABLES, HH_VARIABLES_TRUTH
+from ditaumassskl.samples.higgs import Higgs
+from ditaumassskl.categories.hadhad import *
+from ditaumassskl.categories.features import * #HH_FEATURES, HH_FEATURES_TRUTH, TARGET
+from ditaumassskl.plotting.compare import draw_ratio, draw_hists
+from ditaumassskl.regressor import Regressor
+
+log = logging.getLogger(os.path.basename(__file__))
+log.setLevel("DEBUG")
+
+from matplotlib import rc
+rc('font',**{'family':'sans-serif','sans-serif':['Helvetica']})
+## for Palatino and other serif fonts use:
+#rc('font',**{'family':'serif','serif':['Palatino']})
+rc('text', usetex=True)
+
+# setup parser
+#parser = ArgumentParser()
+from argparse import ArgumentParser
+
+parser.add_argument('--input', "-i", nargs="+", help="input root files")
+parser.add_argument('--var', default=None, help='Specify a particular variable')
+parser.add_argument('--logy', default=False, action='store_true')
+parser.add_argument('--cut', default=None, type=str, help='additional cut to apply')
+parser.add_argument('-m','--mode', default='gg', type=str)
+parser.add_argument('-l','--level', default='reco', type=str)
+#parser.add_argument('-ch','--channel', default='hh', type=str)
+parser.add_argument('-chd','--check_dists', action='store_true')
+parser.add_argument('-chv','--check_vars', action='store_true')
+parser.add_argument('-corr', '--correlation', action='store_true')
+parser.add_argument('-vis', '--visualize_tree', action='store_true')
+parser.add_argument('-plt', '--plot_feats', action='store_true')
+parser.add_argument('--reco_truth', action='store_true', 
+                    help="compare reco and truth var shapes")
+parser.add_argument('--sample_size', "-sz", action="store_true",
+                    help="train samples size distribution")
+
+args=parser.parse_args()
+
+TRAIN_CUTS = ""#"(ditau_tau1_matched_isHadTau==1) && (ditau_tau0_matched_isHadTau==1)"
+if args.train_channel=='hh':
+    TRAIN_FEATURES = HH_FEATURES
+    TARGET  = TARGET
+    branches = HH_FEATURES#+TARGET#+HH_MASS_PREDICTORS+HH_CUT_BRANCHES
+elif args.train_channel=='lh':
+    TRAIN_FEATURES = LH_FEATURES
+    target   = TARGET
+    branches = LH_FEATURES+TARGET+LH_MASS_PREDICTORS+LH_CUT_BRANCHES
+
+NTUPS_PATH = '/home/sbahrase/WorkDesk/SAMPLES/nTUPLEs/xTau75/'
+if args.check_dists:
+    TRAIN_SAMPLES.plot_event_dist()
+
+from matplotlib import rc
+rc('font',**{'family':'sans-serif','sans-serif':['Helvetica']})
+## for Palatino and other serif fonts use:
+#rc('font',**{'family':'serif','serif':['Palatino']})
+rc('text', usetex=True)
+plt.rc('text', usetex=True)
+
+##--------------------------------------------------------------------------------
+def get_feats_corr(train_data):
+    """
+    Get the correlation matrix for the input features & target.
+    
+    Parameters
+    ----------
+    train_data: pandas data frame; training samples
+    
+    features: list; train features/+target
+
+    Return
+    ------
+    None
+    """
+    #higgs_df = TRAIN_SAMPLES.get_dframe(branches=features, cuts=cuts)
+    corr_matrix = train_data.corr()
+
+    fig, ax1 = plt.subplots(ncols=1)#, figsize=(6,5))
+    opts = {'cmap': plt.get_cmap("RdBu"),
+            'vmin': -1, 'vmax': +1}
+    heatmap1 = ax1.pcolor(corr_matrix, **opts)
+    plt.colorbar(heatmap1, ax=ax1)
+    ax1.set_title("Correlations:({0}){1}".format(
+            args.train_mode,"H-->tautau"))#r'$H\rightarrow \tau_{0}\tau_{0}$'.format(args.train_channel[0])))
+    
+    labels = corr_matrix.columns.values
+    titles=[HH_VARIABLES[l]['title'] for l in labels]
+    for ax in (ax1,):
+        # shift location of ticks to center of the bins
+        ax.set_xticks(np.arange(len(labels))+1., minor=False)
+        ax.set_yticks(np.arange(len(labels))+0.5, minor=False)
+        ax.set_xticklabels(titles, minor=False, ha='right', rotation=70)
+        ax.set_yticklabels(titles, minor=False)
+        
+    plt.tight_layout()
+    plt.savefig("./plots/correlation_matrix_%s_%s_%s.png"
+                %(args.level,args.train_mode, args.train_channel))
+
+
+##--------------------------------------------------------------------------------
+def compare_truth_reco_feats(ifiles, reco_truth_feats, 
+                             tree_name="NOMINAL", 
+                             category=Category_Preselection()):
+    """
+    Compare the full detector reconstructed vs FastSim events.
+    Assuming both reco and truth variables are available in ifiles.
+    Parameters
+    ----------
+    ifiles: str, list of files
+    reco_truth_feats: dict, feats= {"VAR1":[reco_name, truth_name], ...}
+
+    Return
+    ------
+    None
+    """
+    hists = {}
+    #canvas = ROOT.TCanvas()
+    for ifile in ifiles:
+        fname=ifile.split("/")[-1]
+        mass = fname.split("_")[2]
+        tf = ROOT.TFile(ifile, "READ")
+        tree = tf.Get(tree_name)
+        for feat, fnames in reco_truth_feats.iteritems():
+            hists[feat] = [] #<! reco, truth
+            var = HH_VARIABLES[feat] 
+            bins = var["binning"]
+            for fn in fnames:
+                tree.Draw("{0}>>htmp_{1}({2}, {3}, {4})".format(
+                        fn, fn, bins[0], bins[1], bins[2]), (category.cuts).GetTitle())
+                hist = asrootpy(ROOT.gPad.GetPrimitive("htmp_%s"%fn))
+                hists[feat].append(hist)
+     
+        for hn, ha in hists.iteritems():
+            ha[0].SetTitle("Reco")
+            ha[1].SetTitle("Truth")
+            #plot = draw_hists(hists, hn, category, logy=args.logy, unit_area=True)
+            ratio_plot = draw_ratio(ha[0], ha[1], hn, category, ratio_title="Reco / Truth", 
+                                    textsize=20, optional_label_text="(H%s [GeV])"%mass)
+            # log.info(plot)
+            outname = '_'.join([str(date),hn, mass, category.name, args.train_mode,args.train_channel])
+            for format in [".png", ".pdf", ".eps"]:
+                pltname = os.path.join('./plots/variables', outname+format)
+                ratio_plot.SaveAs(pltname)
+            
+        tf.Close()
+    return 
+
+##--------------------------------------------------------------------------------
+def plot_feats(masses, features=HH_FEATURES, category=None):
+    """
+    Plots input features distribution.
+    """
+
+    variables = {}
+    for f in HH_FEATURES:
+        variables[f] = HH_VARIABLES[f]
+
+    if category is None:
+        category = Category_Preselection()
+
+    hists = {}
+    tfiles = []
+    canvas = ROOT.TCanvas()
+    for mass in masses:
+        ifile = os.path.join(NTUPS_PATH, "%s/reco_%s_%i_train.root"%(args.train_channel, args.mode, mass))
+        tf = ROOT.TFile(ifile)
+        tfiles.append(tf)
+        tree = tf.NOMINAL
+        hists[mass] = {}
+        for feat in features:
+            var = HH_VARIABLES[feat] 
+            bins = var["binning"]
+            tree.Draw("{0}>>htmp_{1}({2}, {3}, {4})".format(
+                    feat, feat, bins[0], bins[1], bins[2]), (category.cuts).GetTitle())
+            hist = asrootpy(ROOT.gPad.GetPrimitive("htmp_%s"%feat))
+            hists[mass][feat] = hist
+    canvas.Close()
+
+    for feat in features:
+        hists_per_feat = []
+        for mass in masses:
+            hs = hists[mass][feat]
+            hs.SetTitle("H(%i) [GeV]"%mass)
+            hists_per_feat.append(hists[mass][feat])
+            
+        plot = draw_hists(hists_per_feat, feat, category, logy=args.logy, unit_area=True)
+        mass_str = "_".join([str(m) for m in masses])
+        outname='_'.join([str(date), mass_str, feat, category.name, args.train_mode, args.train_channel])
+        for format in [".png", ".pdf", ".eps"]:
+            plt_name = (os.path.join('./plots/variables', outname+format))
+            plot.SaveAs(plt_name)
+                      
+    return 
+
+##----------------------------------------------------------------------------------------
+def visualize_tree(train_data, features=TRAIN_FEATURES):
+    """
+    TO look at a trained model and print, 
+    how the training is actualy done, 
+    draw a real picture of tree.
+    
+    Parameters
+    ----------
+
+    trained_model: sklearn.tree; pickled trained model, 
+    base classifier/regressor (doesn't work on meta-classifires/regressor).
+
+    test_data: np.array; [[feats, target], ]
+    to visualize what does the classifier to a tree.
+    """
+    from sklearn import tree
+    import graphviz
+
+    regressor = Regressor()
+    regressor.book_base_clf(base_name="DecisionTreeRegressor")
+    model = regressor.train(train_data, features, TARGET, events_frac=0.06)
+    
+
+    feats_names = [
+        "Delta R(tau1, tau2)",
+        "MET",
+        "Scalar sum pT (tau1, tau2)",
+        "Vector sum pT (tau1, tau2)",
+        "Transverse mass (MET, tau1)",
+        "Transverse mass (MET, tau2)",
+        "Visible mass (tau1, tau2)",
+        "Delta phi(tau1, tau2)",
+        "pT (tau1)",
+        "pT (tau2)",
+        "Min[Delta phi (tau1, tau2, MET)]",
+        "Cosine Delta phi(tau1, MET)",
+        "Cosine Delta phi(tau1, MET)",
+        "Delta pT (tau1, tau2)"
+        ]
+    # graphviz doesn't support latex string formatting
+    # for feat in features:
+    #     feats_names.append(HH_VARIABLES[feat]["title"])
+    
+    # make the graph details file, 
+    with open("DecisionTreeRegressor_%s.dot"%date, "w") as ofile:
+        dot_data = tree.export_graphviz(
+            model, 
+            filled=True, 
+            rounded=True,  
+            special_characters=True,
+            impurity=True,
+            #proportion=True,
+            #precision=1, 
+            out_file=ofile,
+            feature_names=feats_names,
+            )
+    return 
+
+##----------------------------------------------------------------------------------------
+def main():
+    
+    pass
+    
+
+
+if __name__=="__main__":
+    # TRAIN_SAMPLES = Higgs(
+    #     ntuple_path=NTUPS_PATH+args.train_channel+'/',
+    #     masses=Higgs.MASSES,
+    #     mode=args.train_mode,
+    #     level=args.level,
+    #     suffix='train')
+
+    # req_branches = HH_FEATURES+TARGET
+    # train_df = TRAIN_SAMPLES.get_dframe(branches=req_branches, cuts=TRAIN_CUTS)
+
+    if args.visualize_tree:
+        visualize_tree(train_df)
+    if args.correlation:
+        get_feats_corr(train_df)
+    if args.plot_feats:
+        plot_feats([100, 150, 200])
+    if args.reco_truth:
+        if(len(args.input)<1):
+            raise IOError("input files pls?")
+        compare_truth_reco_feats(args.input, RECO_TRUTH_FEATURES)
+    if args.sample_size:
+        TRAIN_SAMPLES.plot_event_dist()

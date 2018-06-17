@@ -1,0 +1,244 @@
+#!/usr/bin/env python
+
+"""
+Append predicted BRT mass to ntuples, 
+using a trained model.
+"""
+
+
+import sys, os, re, gc, glob, argparse
+import pickle, shutil, array 
+import logging 
+from multiprocessing import Process    
+
+# local 
+import numpy as np
+from ditaumassskl.categories.features import HH_FEATURES as INPUT_FEATURES
+from ditaumassskl.parallel import run_pool
+# Setup cmd args
+parser = argparse.ArgumentParser()
+parser.add_argument('model', help='path to model file')
+parser.add_argument('--files', nargs='+', 
+                    help='ntuples to append model score to them')
+parser.add_argument('--log', '-l', help='logging level', default='INFO')
+parser.add_argument('--sys', action='store_true', help='include sys trees or not')
+parser.add_argument('--pp', help='parallel processing', action='store_true')
+args = parser.parse_args() 
+
+# Setup ROOT
+import ROOT
+ROOT.gROOT.SetBatch(True)
+
+# logging
+#-----------------------------------------------
+log = logging.getLogger(os.path.basename(__file__))
+log.setLevel(args.log.upper())
+
+# consts 
+#-----------------------------------------------
+COPY_FILE = True
+
+#-----------------------------------------------
+def get_trees(tfile):
+    """=
+    Retrun a list of TTrees in a given root file.
+    """
+    trees = set()
+    trees.add(tfile.Get('NOMINAL'))
+    if args.sys:
+        keys = [k.GetName() for k in tfile.GetListOfKeys()]
+        keys = filter(lambda k: isinstance(tfile.Get(k), ROOT.TTree), keys)
+        for k in keys:
+            if k=='EventLoop_FileExecuted':
+                continue
+            trees.add(tfile.Get(k))
+        
+    return trees
+
+#-----------------------------------------------
+def setup_score_branches(tree, trained_models):
+    """
+    Setup the output branches
+    """
+    
+    scores = dict()
+    score_branches = []
+    for name in trained_models:
+        # if score branch is already in tree do nothing.
+        out_name = "ditau_brt_mass_%s"%name.replace(".pkl", "")
+        if out_name in [b.GetName() for b in tree.GetListOfBranches()]:
+            log.warning("%s is already in %s (skipping tree)"%(out_name, tree.GetName()))
+            continue
+        score = array.array('f', [0.])
+        scores[out_name] = score
+        sb = tree.Branch(out_name, score, out_name+"/F")
+        score_branches.append(sb)
+
+    return scores, score_branches
+
+#-----------------------------------------------
+def setup_tformulas(tree, features):
+    # Setup a TTreeFormula for each feature
+    forms = []
+    for idx in xrange(len(features)):
+        form = features[idx].split(":=")
+        form = map(lambda x: x.strip(), form)
+        form = form[-1]
+        form_name = (features[idx].split(":=")[0]).strip()
+        forms.append(ROOT.TTreeFormula(form_name, form, tree))
+    
+    for form in forms: 
+        form.SetQuickLoad(True)
+    
+    return forms
+
+#-----------------------------------------------
+def evaluate_scores(file_name, trained_model):
+    """
+    Update tree with score branches which are
+    evaluated using the available trained ML model.
+    
+    Parameters
+    ----------
+    tree: ROOT.TTree, tree to evaluate and append bdt scores to it
+    trained_mdel: dict, holding available trained bdts
+
+    Return
+    ------
+    None
+    """
+    # retrive trees in the tfile and loop over them
+    tfile = ROOT.TFile.Open(file_name, 'UPDATE')
+    trees = get_trees(tfile)
+    
+    with open(trained_model, "rb") as mfile:
+        model = pickle.load(mfile)
+    
+    out_name = "ditau_brt_mass_%s"%(trained_model.split("/")[-1]).replace(".pkl", "")
+    for tree in trees:
+        # setup input features tformulas and score branches
+        tree_name = tree.GetName()
+        # tau_0_n_tracks =  ROOT.TTreeFormula("tau_0_n_tracks", "tau_0_n_tracks", tree)
+        
+        forms = setup_tformulas(tree, INPUT_FEATURES)
+        # scores, score_branches = setup_score_branches(tree, trained_models)
+        if out_name in [b.GetName() for b in tree.GetListOfBranches()]:
+            log.warning("%s is already in %s (skipping tree)"%(out_name, tree.GetName()))
+            continue
+        score = array.array('f', [0.])
+        score_branch = tree.Branch(out_name, score, out_name+"/F")
+    
+        # Loop over events in tree
+        tree.SetCacheSize(32*2**20) # 20
+        tree.SetCacheLearnEntries()
+        totalEntries = tree.GetEntries()
+        blockSize = 2**18  # 16
+        blocks = totalEntries/blockSize
+        for block in xrange(blocks+1):
+            # --------------------------
+            # Evaluate features vector
+            # --------------------------
+            for entry in xrange(block*blockSize, 
+                                min(totalEntries, (block+1)*blockSize)):
+                if (entry%1000==0): 
+                    log.info("Tree: {0}, Event: {1}/{2}".format(tree_name, entry+1, totalEntries))
+                tree.LoadTree(entry)
+                if False: 
+                    t.GetEntry(entry) # Try with this on a small file, to make sure the output is identical
+
+                # evaluate input features on tree entry
+                feats = []
+                for form in forms: 
+                    feats.append(form.EvalInstance())          
+            
+                # ----------------------
+                # Evaluate score from trained 
+                # algorithm 
+                # -----------------------    
+                feats = np.require(feats,
+                                   dtype=np.float64,
+                                   requirements=['A', 'W', 'C', 'O'])
+                log.debug(feats)
+                
+                score[0] = model.predict(feats.reshape(1,-1))
+        
+
+                # -----------------------
+                # Fill score branches
+                # -----------------------            
+                log.debug(score)
+                score_branch.Fill()
+        pass #<! blocks loop
+
+        tree.Write(tree.GetName(), ROOT.TObject.kOverwrite)
+    pass #<! trees loop
+    tfile.Close()
+
+    return 
+
+#-----------------------------------------------
+# simple class for parallel processing
+#-----------------------------------------------
+class Job(Process):
+    """
+    simpel worker class for parallel
+    processing. the run method is necessary,
+    which will overload the run method of Procces.
+    """
+    def __init__(self, file_name, model, copy_file=False):
+        super(Job, self).__init__()
+        self.file_name = file_name
+        job_name = file_name
+        if '/' in job_name:
+            job_name = job_name.split('/')[-1]
+        self.job_name = job_name.replace('.root','') 
+        self.model = model
+        self.copy_file = copy_file
+        
+    def run(self):
+        file_name = self.file_name
+        
+        # copy to new file
+        if self.copy_file:
+            output = file_name+'.brt'
+            if os.path.exists(output):
+                log.warning(" {} already exists (will skip copying if file is in good shape)" .format(output))
+                tf = ROOT.TFile.Open(output, 'READ')
+                if not tf:
+                    log.warning("{} exists but it's ZOMBIE, replacing it".format(output))
+                    os.remove(output)
+                    shutil.copy(file_name, output)
+            else:
+                log.info("copying {0} to {1} ...".format(file_name, output))
+                shutil.copy(file_name, output)
+        else:
+            output = file_name
+        
+        # the actual calculation happens here
+        evaluate_scores(output, self.model)
+
+        return 
+
+    
+if __name__=='__main__':
+    import time
+    if not args.model:
+        raise IOError('Path to trained bdts pls ?')
+    
+
+    # sort files based on size to start the heavier ones sooner.
+    args.files.sort(key=lambda f: os.path.getsize(f), reverse=True)
+    jobs = [Job(f, args.model, copy_file=COPY_FILE) for f in args.files]
+
+    st = time.time()
+    # run a pool of jobs
+    if args.pp or len(jobs)> 1:
+        run_pool(jobs, n_jobs=-1)
+    else:
+        # processing one file only (also for PBS, CONDOR Batch)
+        for job in jobs:
+            job.run()
+            
+    ft = time.time()
+
+    print "Delta t: ", (ft - st)

@@ -1,0 +1,433 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+"""
+Train a di-tau mass nueral net model
+"""
+
+# from keras.models import Sequential, model_from_json, model_from_yaml, save_model
+# from keras.layers import Dense
+# from keras.wrappers.scikit_learn import KerasRegressor
+# from keras.callbacks import History 
+
+## sklearn 
+from sklearn.tree import DecisionTreeRegressor
+from sklearn.model_selection import (
+    learning_curve, 
+    validation_curve,
+    cross_val_score, 
+    #cross_validate,
+    cross_val_predict,
+    KFold,
+    GridSearchCV
+    )
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import Pipeline
+from sklearn.metrics import accuracy_score, recall_score, make_scorer
+from sklearn.neural_network import MLPRegressor
+from sklearn.preprocessing import StandardScaler
+from sklearn.feature_selection import (
+    VarianceThreshold, 
+    SelectKBest,
+    SelectFromModel, 
+    f_regression, 
+    mutual_info_regression
+    )
+
+## python imports
+import os, sys
+import random
+import pickle
+from time import time
+
+import pandas as pd
+import numpy as np
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+
+## ROOT
+import ROOT
+
+## local imports
+from ditaumassskl.categories.hadhad.mva import (
+    Category_Preselection, 
+    Category_Boosted, 
+    Category_VBF
+    )
+from ditaumassskl.categories.lephad.mva import (
+    Category_Preselection_lh, 
+    Category_Boosted_lh, 
+    Category_VBF_lh
+    )
+from ditaumassskl.categories.hadhad.common import TRUTH_MATCHED
+from ditaumassskl.categories.lephad.common import TRUTH_MATCHED_lh
+from ditaumassskl.regressor import Regressor
+from ditaumassskl import MASSES, date, parser,base_regs,meta_regs
+from ditaumassskl.categories.features import *
+from ditaumassskl.samples.higgs import Higgs
+from ditaumassskl import log
+
+parser.add_argument('-ne', '--nevts', type=int, default=None)
+parser.add_argument('-kf', '--kfold', action="store_true", help="do k-fold method")
+parser.add_argument('-sp', "--summary_plots", action="store_true")
+args = parser.parse_args()
+
+##---------------------------------------------------------------------------
+## consts
+if args.train_channel=='hh':
+    TRAIN_FEATURES = HH_FEATURES
+    BRANCHES = HH_FEATURES+TARGET
+    CATEGORY =  Category_Preselection()
+    if args.train_level=="truth":
+        CATEGORY = Category_Preselection()
+        CATEGORY.cuts = ROOT.TCut("hadhad==1")#TRUTH_MATCHED
+        CATEGORY.name = "Presel-truth"
+
+elif args.train_channel=='lh':
+    TRAIN_FEATURES = LH_FEATURES
+    BRANCHES = LH_FEATURES+TARGET #+MASS_PREDICTORS
+    CATEGORY =  Category_Preselection_lh()
+    if args.train_level=="truth":
+        CATEGORY = Category_Preselection_lh()
+        CATEGORY.cuts = ROOT.TCut("lephad==1")#TRUTH_MATCHED_lh
+        CATEGORY.name = "Presel-truth"
+
+## prepare training data
+NUM_FOLDS = 5
+FOLD_VAR = "evtnumber"
+if (args.train_level=="reco"):
+    FOLD_VAR = "event_number"
+nEVENTS = args.nevts
+NTUPS_PATH = '/home/sbahrase/WorkDesk/SAMPLES/nTUPLEs/xTau75/'
+
+## perpare training samples
+train_sample = Higgs(
+    ntuple_path=NTUPS_PATH+args.train_channel+'/',
+    masses=Higgs.MASSES,
+    modes=args.train_mode,
+    mode=None,
+    level=args.train_level,
+    suffix='train')
+
+cuts_string = (CATEGORY.cuts).GetTitle()
+train_data = train_sample.get_dframe(
+    nevents=nEVENTS,
+    branches=BRANCHES,
+    cuts=cuts_string
+    )
+log.info("Training selection: {0} => {1}".format(CATEGORY.name, cuts_string))
+log.info("Training with {}".format(train_data.shape))
+
+
+##--------------------------------------------------------------
+## scale data
+def scale_data(data_matrix):
+    """
+    ## Multi-layer Perceptron is sensitive to feature scaling, so it is
+    ## highly recommended to scale your data. For example, scale each
+    ## attribute on the input vector X to [0, 1] or [-1, +1], or
+    ## standardize it to have mean 0 and variance 1. Note that you must
+    ## apply the same scaling to the test set for meaningful results.
+    """
+    scaler = StandardScaler()  
+    # Don't cheat - fit only on training data
+    scaler.fit(data_matrix)  
+    X_train = scaler.transform(data_matrix)  
+    
+    return X_train
+
+
+##--------------------------------------------------------------
+## learining curve
+def plot_learning_curve(estimator, title, X, y, ylim=None, cv=None,
+                        train_sizes=np.linspace(.1, 1.0, 20),
+                        verbose=1,
+                        n_jobs=30, 
+                        ):
+    """
+    Generate a simple plot of the test and training learning curve.
+
+    Parameters
+    ----------
+    estimator : object type that implements the "fit" and "predict" methods
+        An object of that type which is cloned for each validation.
+
+    title : string
+        Title for the chart.
+
+    X : array-like, shape (n_samples, n_features)
+        Training vector, where n_samples is the number of samples and
+        n_features is the number of features.
+
+    y : array-like, shape (n_samples) or (n_samples, n_features), optional
+        Target relative to X for classification or regression;
+        None for unsupervised learning.
+
+    ylim : tuple, shape (ymin, ymax), optional
+        Defines minimum and maximum yvalues plotted.
+
+    cv : int, cross-validation generator or an iterable, optional
+        Determines the cross-validation splitting strategy.
+        Possible inputs for cv are:
+          - None, to use the default 3-fold cross-validation,
+          - integer, to specify the number of folds.
+          - An object to be used as a cross-validation generator.
+          - An iterable yielding train/test splits.
+
+        For integer/None inputs, if ``y`` is binary or multiclass,
+        :class:`StratifiedKFold` used. If the estimator is not a classifier
+        or if ``y`` is neither binary nor multiclass, :class:`KFold` is used.
+
+        Refer :ref:`User Guide <cross_validation>` for the various
+        cross-validators that can be used here.
+
+    n_jobs : integer, optional
+        Number of jobs to run in parallel (default 1).
+    """
+    fig = plt.figure()
+    plt.title(title)
+    if ylim is not None:
+        plt.ylim(*ylim)
+    plt.xlabel("Training examples")
+    plt.ylabel("Score")
+    train_sizes, train_scores, test_scores = learning_curve(
+        estimator, X, y, cv=cv, n_jobs=n_jobs, train_sizes=train_sizes)
+    train_scores_mean = np.mean(train_scores, axis=1)
+    train_scores_std = np.std(train_scores, axis=1)
+    test_scores_mean = np.mean(test_scores, axis=1)
+    test_scores_std = np.std(test_scores, axis=1)
+    plt.grid()
+
+    plt.fill_between(train_sizes, train_scores_mean - train_scores_std,
+                     train_scores_mean + train_scores_std, alpha=0.1,
+                     color="r")
+    plt.fill_between(train_sizes, test_scores_mean - test_scores_std,
+                     test_scores_mean + test_scores_std, alpha=0.1, color="g")
+    plt.plot(train_sizes, train_scores_mean, 'o-', color="r",
+             label="Training score")
+    plt.plot(train_sizes, test_scores_mean, 'o-', color="g",
+             label="Cross-validation score")
+
+    plt.legend(loc="best")
+    return fig
+
+
+##--------------------------------------------------------------
+## 
+def plot_cross_val(estimator, X, y, 
+                   param_name="alpha", 
+                   param_range=np.logspace(-6, -1, 5),
+                   scoring=None,#"mean_squared_error", 
+                   plt_title="Validation Curve",
+                   cv=10, 
+                   n_jobs=30,
+                   ):
+    """
+    When evaluating different settings (“hyperparameters”) for
+    estimators, there is still a risk of overfitting on the test set because
+    the parameters can be tweaked until the estimator performs
+    optimally. This way, knowledge about the test set can “leak” into
+    the model and evaluation metrics no longer report on
+    generalization performance. To solve this problem, yet another
+    part of the dataset can be held out as a so-called “validation
+    set”: training proceeds on the training set, after which
+    evaluation is done on the validation set, and when the experiment
+    seems to be successful, final evaluation can be done on the test
+    set.
+
+    http://scikit-learn.org/stable/modules/cross_validation.html#cross-validation
+    
+    """
+
+    # Make a scorer from a performance metric or loss function.
+    scorer = make_scorer(estimator.score())
+    
+    train_scores, test_scores = validation_curve(
+        estimator, X, y, param_name=param_name, param_range=param_range,
+        cv=cv, scoring=scoring, n_jobs=n_jobs)
+    
+    print train_scores,test_scores
+    train_scores_mean = np.mean(train_scores, axis=1)
+    train_scores_std = np.std(train_scores, axis=1)
+    test_scores_mean = np.mean(test_scores, axis=1)
+    test_scores_std = np.std(test_scores, axis=1)
+
+    fig = plt.figure()
+    plt.title(plt_title)
+    plt.xlabel(param_name)
+    plt.ylabel("Score")
+    plt.ylim(-20.0, 20.)
+    lw = 2
+    plt.semilogx(param_range, train_scores_mean, label="Training score",
+                 color="darkorange", lw=lw)
+    plt.fill_between(param_range, train_scores_mean - train_scores_std,
+                     train_scores_mean + train_scores_std, alpha=0.2,
+                     color="darkorange", lw=lw)
+    plt.semilogx(param_range, test_scores_mean, label="Cross-validation score",
+                 color="navy", lw=lw)
+    plt.fill_between(param_range, test_scores_mean - test_scores_std,
+                     test_scores_mean + test_scores_std, alpha=0.2,
+                     color="navy", lw=lw)
+    plt.legend(loc="best")
+
+    return fig 
+
+##-----------------------------------------------------------------------------
+## main driver  
+if __name__=="__main__":
+    feats = train_data.reindex(columns=TRAIN_FEATURES).as_matrix()
+    target = train_data.reindex(columns=TARGET).as_matrix().ravel() 
+    
+    HIDDEN_SIZE = (42,)
+    # prepare the MLP
+    mlp_regressor = MLPRegressor(
+        hidden_layer_sizes=HIDDEN_SIZE, 
+        activation="relu", 
+        solver="adam", 
+        alpha=0.0001, 
+        batch_size="auto", 
+        learning_rate="constant", 
+        learning_rate_init=0.001, 
+        power_t=0.5, 
+        max_iter=200, 
+        shuffle=True, 
+        random_state=1, 
+        tol=0.0001, 
+        verbose=True, 
+        warm_start=False, 
+        momentum=0.9, 
+        nesterovs_momentum=True, 
+        early_stopping=False, 
+        validation_fraction=0.1, 
+        beta_1=0.9, 
+        beta_2=0.999, 
+        epsilon=1e-08
+        )
+
+    if not (args.kfold):
+        #scaled_feats = scale_data(feats)
+        mlp_regressor.fit(feats, target)
+        print mlp_regressor.score(feats, target)
+        # save the model
+        model_name = "./trained_models/%s_MLP_%i_%i_%s_%s_%s_%s.pkl"%(
+            str(date), train_data.shape[0], len(TRAIN_FEATURES),
+            "_".join([str(h) for h in HIDDEN_SIZE]), 
+            "_".join(args.train_mode), args.train_level, CATEGORY.name)
+        with open(model_name, "w") as ofile:
+            pickle.dump(mlp_regressor, ofile)
+        log.info("model is saved to %s"%model_name)
+
+        # do some training 
+        cv_name = model_name.replace("./trained_models/", "").replace(".pkl", "")
+        # learning_plot = plot_learning_curve(mlp_regressor, "Learinig Curve", feats, target)
+        # learning_plot.savefig("./plots/%s_learning_curve.png"%cv_name)
+        # cross_val_plot = plot_cross_val(mlp_regressor, feats, target)
+        # cross_val_plot.savefig("./plots/%s_cross_validation_alpha.png"%cv_name)
+    else:
+        kfold = KFold(n_splits=NUM_FOLDS)
+        k = 0
+        for train_index, test_index in (kfold.split(train_data)):
+            feats = train_data.reindex(columns=TRAIN_FEATURES).as_matrix()[train_index]
+            target = train_data.reindex(columns=TARGET).as_matrix().ravel()[train_index]
+            
+            # train model
+            mlp_regressor.fit(feats, target)
+            
+            # save the model
+            model_name = "./trained_models/%s_MLP_%i_%i_%s_%s_%s_%s_%s.pkl"%(
+                str(date), train_data.shape[0], len(TRAIN_FEATURES),
+                "_".join([str(h) for h in HIDDEN_SIZE]), 
+                "FOLD%i_MOD%i"%(NUM_FOLDS, k),
+                "_".join(args.train_mode), args.train_level, CATEGORY.name)
+            with open(model_name, "w") as ofile:
+                pickle.dump(mlp_regressor, ofile)
+                
+            log.info("model is save to %s"%model_name)
+
+            k += 1 #<! go to the next fold
+
+
+
+
+
+
+
+
+####FIXME: DEPRECATED! TO BE CLEANED UP
+
+# ##--------------------------------------------------------------
+# ## prepare the model
+# def build_model(num_feats=len(TRAIN_FEATURES)):
+#     # create model
+#     model = Sequential()
+#     model.add(Dense(num_feats, input_dim=num_feats, kernel_initializer='normal', activation='relu'))
+#     # model.add(Dense(num_feats-7, kernel_initializer='normal', activation='sigmoid'))
+#     # model.add(Dense(num_feats-9, kernel_initializer='normal', activation='sigmoid'))
+
+#     model.add(Dense(1, kernel_initializer='normal', activation='relu'))
+    
+#     # Compile model
+#     model.summary()
+#     model.compile(loss='mean_squared_error', optimizer='adam')
+    
+#     return model
+
+# ##--------------------------------------------------------------
+# ## save the trained model to disk
+# def save_model(model, model_name="keras_model.json"):
+#     # saving model
+#     json_model = model.model.to_json()
+#     with open("%s.json"%model_name, "w") as json_file:
+#         json_file.write(json_model)
+#     model.model.save_weights("%s.h5"%model_name, overwrite=True)
+#     return 
+
+# ##--------------------------------------------------------------
+# ## load the model
+# def load_model():
+#     model = model_from_json(open('kmodel.json').read())
+#     model.load_weights('kmodel.h5')
+#     model.compile(loss='mean_squared_error', optimizer='adam')
+#     return model
+
+# if __name__=="__main__":
+#     # build model
+#     model = KerasRegressor(build_fn=build_model, nb_epoch=100, batch_size=5, verbose=1)
+#     feats = train_data.reindex(columns=TRAIN_FEATURES).as_matrix()
+#     target = train_data.reindex(columns=TARGET).as_matrix().ravel() 
+    
+#     # model history
+#     history = History()
+#     model.fit(feats, target, epochs=5, batch_size=10, verbose=1, callbacks=[history])
+    
+#     # save model
+#     model_name = "./trained_models/%s_KerasNN_%i_%i_%s_%s_%s"%(
+#         str(date), train_data.shape[0], len(TRAIN_FEATURES), "_".join(args.train_mode), args.train_level, CATEGORY.name) 
+
+#     save_model(model, model_name=model_name)
+#     if args.summary_plots:
+#         fig = plt.figure()
+#         ax = plt.gca()
+   
+#         # summarize history for loss
+#         plt.plot(history.history['loss'])
+#         plt.title('model loss')
+#         plt.ylabel('loss')
+#         plt.xlabel('epoch')
+#         plt.legend(['train', 'test'], loc='upper left')
+#         for ext in [".png", ".eps", ".pdf"]:
+#             outfig = "%s_loss%s"%(model_name, ext)
+#             fig.savefig(outfig)
+#             log.info("created %s"%outfig)
+        
+#     # # load model
+#     # model1 = load_model()
+    
+#     # test_feats = test_data.reindex(columns=TRAIN_FEATURES).as_matrix()
+#     # test_target = test_data.reindex(columns=TARGET).as_matrix().ravel()
+#     # prediction = model1.predict(test_feats)
+
+#     # print np.mean(prediction), np.std(prediction)
+
+
+
